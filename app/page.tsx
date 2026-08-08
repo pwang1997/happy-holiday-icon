@@ -1,69 +1,208 @@
-import Image from "next/image";
+'use client';
+
+import Image from 'next/image';
+import { useState, type FormEvent } from 'react';
+
+type SubmitResponse = {
+  imageUrl: string;
+  revisedPrompt: string | null;
+};
+
+function isSubmitResponse(value: unknown): value is SubmitResponse {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const response = value as Record<string, unknown>;
+
+  return (
+    typeof response.imageUrl === 'string' &&
+    (response.revisedPrompt === null ||
+      typeof response.revisedPrompt === 'string')
+  );
+}
 
 export default function Home() {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<SubmitResponse | null>(null);
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const formData = new FormData(event.currentTarget);
+      const response = await fetch('/api/submit', {
+        method: 'POST',
+        body: formData,
+      });
+      const data: unknown = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        const message =
+          typeof data === 'object' &&
+          data !== null &&
+          'error' in data &&
+          typeof data.error === 'string'
+            ? data.error
+            : 'The icon could not be created.';
+
+        throw new Error(message);
+      }
+
+      if (!isSubmitResponse(data)) {
+        throw new Error('The server returned an invalid image response.');
+      }
+
+      setResult(data);
+    } catch (submissionError) {
+      setError(
+        submissionError instanceof Error
+          ? submissionError.message
+          : 'The icon could not be created.',
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-4 py-12 text-slate-100 sm:px-6">
+      <div
+        aria-hidden="true"
+        className="absolute -left-32 -top-32 h-80 w-80 rounded-full bg-rose-500/20 blur-3xl"
+      />
+      <div
+        aria-hidden="true"
+        className="absolute -bottom-40 -right-24 h-96 w-96 rounded-full bg-amber-300/15 blur-3xl"
+      />
+
+      <section className="relative w-full max-w-xl rounded-3xl border border-white/10 bg-white/[0.07] p-6 shadow-2xl shadow-black/30 backdrop-blur-xl sm:p-10">
+        <header>
+          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-amber-300">
+            Happy Holiday Icon
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+            Create something merry.
+          </h1>
+          <p className="mt-3 max-w-md text-sm leading-6 text-slate-300 sm:text-base">
+            Upload an image, add a little direction, and choose a style for your
+            holiday icon.
+          </p>
+        </header>
+
+        <form
+          onSubmit={onSubmit}
+          encType="multipart/form-data"
+          className="mt-8 space-y-6"
+        >
+          <div>
+            <label
+              htmlFor="image"
+              className="block text-sm font-medium text-slate-100"
+            >
+              Upload an image
+            </label>
+            <div className="mt-2 rounded-2xl border border-dashed border-white/20 bg-slate-900/40 p-4 transition-colors focus-within:border-amber-300/70">
+              <input
+                id="image"
+                name="image"
+                type="file"
+                accept="image/*"
+                required
+                className="block w-full cursor-pointer text-sm text-slate-300 file:mr-4 file:rounded-lg file:border-0 file:bg-amber-300 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-950 file:transition-colors hover:file:bg-amber-200 focus:outline-none"
+              />
+              <p className="mt-3 text-xs text-slate-400">
+                PNG, JPG, or WEBP image files.
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <label
+              htmlFor="prompt"
+              className="block text-sm font-medium text-slate-100"
+            >
+              What should we make?
+            </label>
+            <input
+              id="prompt"
+              name="prompt"
+              type="text"
+              placeholder="A cheerful snowman with a red scarf"
+              required
+              className="mt-2 block w-full rounded-xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 transition focus:border-amber-300 focus:ring-2 focus:ring-amber-300/20"
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+          </div>
+
+          <div>
+            <label
+              htmlFor="style"
+              className="block text-sm font-medium text-slate-100"
+            >
+              Choose a style
+            </label>
+            <select
+              id="style"
+              name="style"
+              defaultValue="playful"
+              className="mt-2 block w-full rounded-xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-300/20"
+            >
+              <option value="playful">Playful illustration</option>
+              <option value="minimal">Minimal and clean</option>
+              <option value="vintage">Vintage postcard</option>
+              <option value="festive">Bright and festive</option>
+            </select>
+          </div>
+
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-300 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+            {isSubmitting ? 'Creating icon...' : 'Create icon'}
+            <span aria-hidden="true">{isSubmitting ? '⋯' : '→'}</span>
+          </button>
+
+          {error && (
+            <p role="alert" className="text-sm text-rose-300">
+              {error}
+            </p>
+          )}
+        </form>
+
+        {result && (
+          <section
+            aria-live="polite"
+            className="mt-8 space-y-4 border-t border-white/10 pt-8"
+          >
+            <div className="overflow-hidden rounded-2xl bg-slate-900/60">
+              <Image
+                src={result.imageUrl}
+                alt="Generated holiday icon"
+                width={1024}
+                height={1024}
+                unoptimized
+                className="h-auto w-full"
+              />
+            </div>
+            <a
+              href={result.imageUrl}
+              download="happy-holiday-icon.png"
+              className="inline-flex rounded-lg border border-white/15 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-amber-300 hover:text-amber-200"
+            >
+              Download icon
+            </a>
+            {result.revisedPrompt && (
+              <p className="text-xs leading-5 text-slate-400">
+                Generated with: {result.revisedPrompt}
+              </p>
+            )}
+          </section>
+        )}
+      </section>
+    </main>
   );
 }
