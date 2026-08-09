@@ -1,0 +1,11 @@
+project_name = "happy-holiday-icon"
+environment  = "dev"
+aws_region   = "ca-central-1"
+
+allowed_origins = [
+  "http://localhost:3000",
+  "https://happy-holiday-icon.vercel.app",
+]
+
+# Keep false unless this is a disposable environment.
+force_destroy = false
