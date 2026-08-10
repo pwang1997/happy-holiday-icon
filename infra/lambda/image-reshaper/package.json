@@ -1,0 +1,9 @@
+{
+  "name": "happy-holiday-icon-image-reshaper",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1106.0",
+    "sharp": "0.35.3"
+  }
+}

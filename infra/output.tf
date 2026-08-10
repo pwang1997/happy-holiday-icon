@@ -28,6 +28,16 @@ output "image_upload_policy_arn" {
   value       = aws_iam_policy.nextjs_s3_upload.arn
 }
 
+output "image_reshaper_function_name" {
+  description = "Name of the Lambda function that reshapes temporary images."
+  value       = aws_lambda_function.image_reshaper.function_name
+}
+
+output "image_reshaper_function_arn" {
+  description = "ARN of the Lambda function that reshapes temporary images."
+  value       = aws_lambda_function.image_reshaper.arn
+}
+
 output "app_environment" {
   description = "Non-secret environment values required by the Next.js runtime."
   value = {
