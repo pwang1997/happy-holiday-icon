@@ -43,7 +43,7 @@ export async function uploadImage({
 }) {
   await getS3Client().send(
     new PutObjectCommand({
-      Bucket: getS3Bucket("AWS_S3_FINAL_BUCKET"),
+      Bucket: getS3Bucket("AWS_S3_BUCKET"),
       Key: key,
       Body: body,
       ContentType: contentType,

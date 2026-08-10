@@ -56,7 +56,7 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
-
+  // replace filename with image sha256 hash
   const key = `images/${crypto.randomUUID()}-${safeFileName}`;
 
   try {
@@ -66,9 +66,13 @@ export async function POST(request: Request) {
       ContentType: fileType,
     });
 
+    console.debug("DEBUG: Start uploading image to S3 bucket")
+
     const uploadUrl = await getSignedUrl(getS3Client(), command, {
       expiresIn: 60,
     });
+
+    console.debug("DEBUG: Uploaded image to S3 bucket")
 
     return Response.json({ uploadUrl, key });
   } catch (error) {
