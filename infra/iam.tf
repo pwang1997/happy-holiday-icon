@@ -7,6 +7,7 @@ resource "aws_iam_policy" "nextjs_s3_upload" {
 
     Statement = [
       {
+        Sid    = "TemporaryImages"
         Effect = "Allow"
 
         Action = [
@@ -15,7 +16,18 @@ resource "aws_iam_policy" "nextjs_s3_upload" {
         ]
 
         Resource = "${aws_s3_bucket.images.arn}/images/*"
-      }
+      },
+      {
+        Sid    = "FinalImages"
+        Effect = "Allow"
+
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+        ]
+
+        Resource = "${aws_s3_bucket.final_images.arn}/images/*"
+      },
     ]
   })
 }

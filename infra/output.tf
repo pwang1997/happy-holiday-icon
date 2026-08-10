@@ -1,11 +1,21 @@
 output "image_bucket_name" {
-  description = "Name of the private S3 bucket used for generated images."
+  description = "Name of the temporary private S3 bucket used for image ingest."
   value       = aws_s3_bucket.images.bucket
 }
 
 output "image_bucket_arn" {
-  description = "ARN of the private S3 bucket used for generated images."
+  description = "ARN of the temporary private S3 bucket used for image ingest."
   value       = aws_s3_bucket.images.arn
+}
+
+output "final_image_bucket_name" {
+  description = "Name of the private S3 bucket used for final images."
+  value       = aws_s3_bucket.final_images.bucket
+}
+
+output "final_image_bucket_arn" {
+  description = "ARN of the private S3 bucket used for final images."
+  value       = aws_s3_bucket.final_images.arn
 }
 
 output "image_bucket_region" {
@@ -21,7 +31,8 @@ output "image_upload_policy_arn" {
 output "app_environment" {
   description = "Non-secret environment values required by the Next.js runtime."
   value = {
-    AWS_REGION    = var.aws_region
-    AWS_S3_BUCKET = aws_s3_bucket.images.bucket
+    AWS_REGION          = var.aws_region
+    AWS_S3_BUCKET       = aws_s3_bucket.images.bucket
+    AWS_S3_FINAL_BUCKET = aws_s3_bucket.final_images.bucket
   }
 }

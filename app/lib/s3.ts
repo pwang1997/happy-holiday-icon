@@ -22,11 +22,11 @@ export function getS3Client() {
   return client;
 }
 
-function getS3Bucket() {
-  const bucket = process.env.AWS_S3_BUCKET?.trim();
+function getS3Bucket(environmentVariable: "AWS_S3_BUCKET" | "AWS_S3_FINAL_BUCKET") {
+  const bucket = process.env[environmentVariable]?.trim();
 
   if (!bucket) {
-    throw new Error("AWS_S3_BUCKET is not configured");
+    throw new Error(`${environmentVariable} is not configured`);
   }
 
   return bucket;
@@ -43,7 +43,7 @@ export async function uploadImage({
 }) {
   await getS3Client().send(
     new PutObjectCommand({
-      Bucket: getS3Bucket(),
+      Bucket: getS3Bucket("AWS_S3_FINAL_BUCKET"),
       Key: key,
       Body: body,
       ContentType: contentType,
@@ -55,7 +55,7 @@ export async function getImageDownloadUrl(key: string, expiresIn = 3600) {
   return getSignedUrl(
     getS3Client(),
     new GetObjectCommand({
-      Bucket: getS3Bucket(),
+      Bucket: getS3Bucket("AWS_S3_FINAL_BUCKET"),
       Key: key,
     }),
     { expiresIn },

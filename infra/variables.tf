@@ -42,3 +42,14 @@ variable "force_destroy" {
   description = "Delete all bucket objects when Terraform destroys the bucket. Keep false outside disposable environments."
   default     = false
 }
+
+variable "temporary_object_retention_days" {
+  type        = number
+  description = "Number of days to retain current objects in the temporary ingest bucket."
+  default     = 7
+
+  validation {
+    condition     = var.temporary_object_retention_days > 0
+    error_message = "temporary_object_retention_days must be greater than zero."
+  }
+}
