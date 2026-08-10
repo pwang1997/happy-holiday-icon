@@ -1,5 +1,6 @@
 import { HumanMessage } from "@langchain/core/messages";
 import { ChatOpenAI, tools } from "@langchain/openai";
+import { getImageDownloadUrl, uploadImage } from "@/app/lib/s3";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -149,8 +150,29 @@ export async function POST(request: Request) {
       return errorResponse("The image generator did not return an image.", 502);
     }
 
+    const imageKey = `images/${crypto.randomUUID()}-holiday-icon.png`;
+
+    let imageUrl: string;
+
+    try {
+      await uploadImage({
+        key: imageKey,
+        body: Buffer.from(imageOutput.result, "base64"),
+        contentType: "image/png",
+      });
+
+      imageUrl = await getImageDownloadUrl(imageKey);
+    } catch (error) {
+      console.error("Generated image could not be saved to S3", error);
+      return errorResponse(
+        "The generated image could not be saved. Please try again.",
+        502,
+      );
+    }
+
     return Response.json({
-      imageUrl: `data:image/png;base64,${imageOutput.result}`,
+      imageUrl,
+      imageKey,
       revisedPrompt: imageOutput.revised_prompt ?? null,
     });
   } catch (error) {
