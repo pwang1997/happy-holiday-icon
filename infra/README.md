@@ -2,8 +2,8 @@
 
 This module provisions two private S3 buckets:
 
-- `image_bucket_name` / `AWS_S3_BUCKET`: temporary ingest storage. The browser presign endpoint writes here, and current objects expire after the configured retention period. New objects under `images/` trigger the image-reshaping Lambda.
-- `final_image_bucket_name` / `AWS_S3_FINAL_BUCKET`: durable final-image storage. `/api/submit` writes generated PNGs here and returns signed download URLs.
+- `image_bucket_name` / `AWS_S3_BUCKET`: temporary ingest storage. Browser source uploads use `uploads/`; generated images use `images/`, which triggers the reshaping Lambda. Both prefixes expire after the configured retention period.
+- `final_image_bucket_name` / `AWS_S3_FINAL_BUCKET`: durable final-image storage. The Lambda writes the WebP derivatives here.
 
 It also provisions `image_jobs_table_name` / `DYNAMODB_JOBS_TABLE`, an on-demand DynamoDB table for transient image job status. Store the status in a `status` attribute and the Unix epoch expiration time in `expires_at`; TTL cleanup is enabled for that attribute.
 

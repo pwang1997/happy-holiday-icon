@@ -1,18 +1,17 @@
 import {
-  getImageDownloadUrlIfExists,
-  uploadImage,
-} from "@/app/lib/s3";
+  getImageJob,
+  imageHashFromSourceKey,
+  isExpired,
+  updateImageJob,
+} from "@/app/lib/jobs";
+import { getTemporaryImage, uploadImage } from "@/app/lib/s3";
 import { HumanMessage } from "@langchain/core/messages";
 import { ChatOpenAI, tools } from "@langchain/openai";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
 const MAX_PROMPT_LENGTH = 500;
-const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
-const DERIVATIVE_SIZES = [32, 48, 512] as const;
-const DERIVATIVE_RETRY_DELAYS_MS = [250, 500, 750, 1_000, 1_500, 2_000, 3_000];
 
 const STYLE_INSTRUCTIONS = {
   playful:
@@ -26,13 +25,6 @@ const STYLE_INSTRUCTIONS = {
 } as const;
 
 type Style = keyof typeof STYLE_INSTRUCTIONS;
-type DerivativeSize = (typeof DERIVATIVE_SIZES)[number];
-
-type ImageDerivative = {
-  size: DerivativeSize;
-  key: string;
-  url: string;
-};
 
 type ImageGenerationOutput = {
   type?: string;
@@ -48,45 +40,8 @@ function isStyle(value: string): value is Style {
   return Object.prototype.hasOwnProperty.call(STYLE_INSTRUCTIONS, value);
 }
 
-function wait(milliseconds: number) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-async function getAvailableImageDerivatives(
-  imageKey: string,
-): Promise<ImageDerivative[]> {
-  const imageBaseKey = imageKey.replace(/\.[^/.]+$/, "");
-  let availableDerivatives: ImageDerivative[] = [];
-
-  for (
-    let attempt = 0;
-    attempt <= DERIVATIVE_RETRY_DELAYS_MS.length;
-    attempt += 1
-  ) {
-    const candidates = await Promise.all(
-      DERIVATIVE_SIZES.map(async (size) => {
-        const key = `${imageBaseKey}/${size}.webp`;
-        const url = await getImageDownloadUrlIfExists(key);
-
-        return url ? { size, key, url } : null;
-      }),
-    );
-
-    availableDerivatives = candidates.filter(
-      (candidate): candidate is ImageDerivative => candidate !== null,
-    );
-
-    if (
-      availableDerivatives.length === DERIVATIVE_SIZES.length ||
-      attempt === DERIVATIVE_RETRY_DELAYS_MS.length
-    ) {
-      return availableDerivatives;
-    }
-
-    await wait(DERIVATIVE_RETRY_DELAYS_MS[attempt]);
-  }
-
-  return availableDerivatives;
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message.slice(0, 500) : "Unknown error";
 }
 
 export async function POST(request: Request) {
@@ -107,20 +62,12 @@ export async function POST(request: Request) {
     return errorResponse("The form submission could not be read.", 400);
   }
 
-  const imageValue = formData.get("image");
+  const jobIdValue = formData.get("jobId");
   const promptValue = formData.get("prompt");
   const styleValue = formData.get("style");
 
-  if (!(imageValue instanceof File) || imageValue.size === 0) {
-    return errorResponse("Please upload an image.", 400);
-  }
-
-  if (!ALLOWED_IMAGE_TYPES.has(imageValue.type)) {
-    return errorResponse("Only PNG, JPG, and WEBP images are supported.", 415);
-  }
-
-  if (imageValue.size > MAX_IMAGE_SIZE_BYTES) {
-    return errorResponse("The image must be 10 MB or smaller.", 413);
+  if (typeof jobIdValue !== "string" || !jobIdValue) {
+    return errorResponse("An image job is required.", 400);
   }
 
   if (typeof promptValue !== "string" || promptValue.trim().length === 0) {
@@ -140,37 +87,47 @@ export async function POST(request: Request) {
     return errorResponse("Please choose a supported style.", 400);
   }
 
-  const imageBytes = await imageValue.arrayBuffer();
-  const base64Image = Buffer.from(imageBytes).toString("base64");
-  const imageDataUrl = `data:${imageValue.type};base64,${base64Image}`;
-  const styleInstruction = STYLE_INSTRUCTIONS[styleValue];
-
-  const instruction = [
-    "Edit the uploaded reference image into a single holiday app icon.",
-    `The requested subject or direction is: ${prompt}`,
-    `The requested visual style is: ${styleInstruction}`,
-    "Keep the main subject recognizable, centered, and legible at small sizes.",
-    "Use a square composition, a clean silhouette, and no text or watermark.",
-    "Return the finished icon as a PNG with a transparent background when possible.",
-  ].join("\n");
+  let job;
 
   try {
+    job = await getImageJob(jobIdValue);
+  } catch (error) {
+    console.error("Unable to read image job", error);
+    return errorResponse("Unable to read the image job.", 503);
+  }
+
+  if (!job || isExpired(job)) {
+    return errorResponse("Image job not found.", 404);
+  }
+
+  if (job.status !== "UPLOADING") {
+    return errorResponse("This image job has already started.", 409);
+  }
+
+  try {
+    await updateImageJob(job.jobId, { status: "GENERATING", error: null });
+
+    const sourceImage = await getTemporaryImage(job.sourceKey);
+    const sourceContentType = sourceImage.contentType ?? "image/png";
+    const imageDataUrl = `data:${sourceContentType};base64,${sourceImage.body.toString("base64")}`;
+    const instruction = [
+      "Edit the uploaded reference image into a single holiday app icon.",
+      `The requested subject or direction is: ${prompt}`,
+      `The requested visual style is: ${STYLE_INSTRUCTIONS[styleValue]}`,
+      "Keep the main subject recognizable, centered, and legible at small sizes.",
+      "Use a square composition, a clean silhouette, and no text or watermark.",
+      "Return the finished icon as a PNG with a transparent background when possible.",
+    ].join("\n");
     const model = new ChatOpenAI({
       apiKey,
-      // This is the text-capable main model that invokes the image tool.
-      // GPT Image models belong in tools.imageGeneration(), not here.
       model: process.env.OPENAI_MODEL?.trim() || "gpt-4o",
     });
-
     const response = await model.invoke(
       [
         new HumanMessage({
           content: [
             { type: "text", text: instruction },
-            {
-              type: "image_url",
-              image_url: { url: imageDataUrl },
-            },
+            { type: "image_url", image_url: { url: imageDataUrl } },
           ],
         }),
       ],
@@ -180,7 +137,6 @@ export async function POST(request: Request) {
             action: "edit",
             background: "transparent",
             inputFidelity: "high",
-            // Keep transparency enabled; newer image models may reject it.
             model: "gpt-image-1",
             outputFormat: "png",
             quality: "medium",
@@ -190,7 +146,6 @@ export async function POST(request: Request) {
         tool_choice: { type: "image_generation" },
       },
     );
-
     const toolOutputs = response.additional_kwargs?.tool_outputs;
     const imageOutput = Array.isArray(toolOutputs)
       ? (toolOutputs.find(
@@ -203,41 +158,37 @@ export async function POST(request: Request) {
       : undefined;
 
     if (!imageOutput?.result) {
-      console.error("OpenAI did not return an image");
-      return errorResponse("The image generator did not return an image.", 502);
+      throw new Error("The image generator did not return an image.");
     }
 
-    const imageBytes = await imageValue.arrayBuffer();
-    const hashBuffer = await crypto.subtle.digest("SHA-256", imageBytes);
-    const imageHash = Array.from(new Uint8Array(hashBuffer), (byte) =>
-      byte.toString(16).padStart(2, "0"),
-    ).join("");
+    const imageKey = `images/${imageHashFromSourceKey(job.sourceKey)}-holiday-icon.png`;
+    await updateImageJob(job.jobId, { status: "RESHAPING", error: null });
+    await uploadImage({
+      key: imageKey,
+      body: Buffer.from(imageOutput.result, "base64"),
+      contentType: "image/png",
+      metadata: { jobid: job.jobId },
+    });
 
-    const imageKey = `images/${imageHash}-holiday-icon.png`;
-
-    try {
-      await uploadImage({
-        key: imageKey,
-        body: Buffer.from(imageOutput.result, "base64"),
-        contentType: "image/png",
-      });
-
-      const imageUrls = await getAvailableImageDerivatives(imageKey);
-
-      return Response.json({
-        imageUrls,
+    return Response.json(
+      {
+        jobId: job.jobId,
+        status: "RESHAPING",
         imageKey,
         revisedPrompt: imageOutput.revised_prompt ?? null,
-      });
-    } catch (error) {
-      console.error("Generated image could not be saved to S3", error);
-      return errorResponse(
-        "The generated image could not be saved. Please try again.",
-        502,
-      );
-    }
+      },
+      { status: 202 },
+    );
   } catch (error) {
+    const message = errorMessage(error);
     console.error("Image generation failed", error);
+
+    try {
+      await updateImageJob(job.jobId, { status: "FAILED", error: message });
+    } catch (jobError) {
+      console.error("Unable to mark image job as failed", jobError);
+    }
+
     return errorResponse("Image generation failed. Please try again.", 502);
   }
 }

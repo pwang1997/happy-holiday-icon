@@ -15,7 +15,10 @@ resource "aws_iam_policy" "nextjs_s3_upload" {
           "s3:GetObject",
         ]
 
-        Resource = "${aws_s3_bucket.images.arn}/images/*"
+        Resource = [
+          "${aws_s3_bucket.images.arn}/images/*",
+          "${aws_s3_bucket.images.arn}/uploads/*",
+        ]
       },
       {
         Sid    = "FinalImages"

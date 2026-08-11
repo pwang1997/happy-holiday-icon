@@ -1,5 +1,6 @@
 import {
   GetObjectCommand,
+  type GetObjectCommandOutput,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -33,14 +34,20 @@ function getS3Bucket(environmentVariable: "AWS_S3_BUCKET" | "AWS_S3_FINAL_BUCKET
   return bucket;
 }
 
+export function getTemporaryImageBucket() {
+  return getS3Bucket("AWS_S3_BUCKET");
+}
+
 export async function uploadImage({
   key,
   body,
   contentType,
+  metadata,
 }: {
   key: string;
   body: Buffer;
   contentType: string;
+  metadata?: Record<string, string>;
 }) {
   await getS3Client().send(
     new PutObjectCommand({
@@ -48,8 +55,31 @@ export async function uploadImage({
       Key: key,
       Body: body,
       ContentType: contentType,
+      Metadata: metadata,
     }),
   );
+}
+
+async function bodyToBuffer(body: GetObjectCommandOutput["Body"]) {
+  if (!body) {
+    throw new Error("S3 returned an empty object body");
+  }
+
+  return Buffer.from(await body.transformToByteArray());
+}
+
+export async function getTemporaryImage(key: string) {
+  const object = await getS3Client().send(
+    new GetObjectCommand({
+      Bucket: getTemporaryImageBucket(),
+      Key: key,
+    }),
+  );
+
+  return {
+    body: await bodyToBuffer(object.Body),
+    contentType: object.ContentType,
+  };
 }
 
 export async function getImageDownloadUrl(key: string, expiresIn = 3600) {

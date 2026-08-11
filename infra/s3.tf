@@ -78,6 +78,19 @@ resource "aws_s3_bucket_lifecycle_configuration" "images" {
       noncurrent_days = 30
     }
   }
+
+  rule {
+    id     = "uploaded-source-maintenance"
+    status = "Enabled"
+
+    filter {
+      prefix = "uploads/"
+    }
+
+    expiration {
+      days = var.temporary_object_retention_days
+    }
+  }
 }
 
 data "aws_iam_policy_document" "images_tls_only" {

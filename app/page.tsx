@@ -12,7 +12,45 @@ type SubmitResponse = {
   revisedPrompt: string | null;
 };
 
+type ImageUrlsResponse = Pick<SubmitResponse, 'imageUrls'>;
+
+type JobStatus =
+  | 'UPLOADING'
+  | 'GENERATING'
+  | 'RESHAPING'
+  | 'READY'
+  | 'FAILED';
+
+type JobCreateResponse = {
+  jobId: string;
+  status: 'UPLOADING';
+  uploadUrl: string;
+};
+
+type JobResponse = ImageUrlsResponse & {
+  jobId: string;
+  status: JobStatus;
+  error: string | null;
+};
+
+const STATUS_LABELS: Record<Exclude<JobStatus, 'READY' | 'FAILED'>, string> = {
+  UPLOADING: 'Uploading image…',
+  GENERATING: 'Generating image…',
+  RESHAPING: 'Reshaping image…',
+};
+
 function isSubmitResponse(value: unknown): value is SubmitResponse {
+  if (!isImageUrlsResponse(value)) {
+    return false;
+  }
+
+  const response = value as Record<string, unknown>;
+  return (
+    response.revisedPrompt === null || typeof response.revisedPrompt === 'string'
+  );
+}
+
+function isImageUrlsResponse(value: unknown): value is ImageUrlsResponse {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
@@ -32,14 +70,52 @@ function isSubmitResponse(value: unknown): value is SubmitResponse {
         typeof image.key === 'string' &&
         'url' in image &&
         typeof image.url === 'string',
-    ) &&
-    (response.revisedPrompt === null ||
-      typeof response.revisedPrompt === 'string')
+    )
   );
+}
+
+function isJobCreateResponse(value: unknown): value is JobCreateResponse {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'jobId' in value &&
+    typeof value.jobId === 'string' &&
+    'status' in value &&
+    value.status === 'UPLOADING' &&
+    'uploadUrl' in value &&
+    typeof value.uploadUrl === 'string'
+  );
+}
+
+function isJobResponse(value: unknown): value is JobResponse {
+  return (
+    isImageUrlsResponse(value) &&
+    'jobId' in value &&
+    typeof value.jobId === 'string' &&
+    'status' in value &&
+    typeof value.status === 'string' &&
+    ['UPLOADING', 'GENERATING', 'RESHAPING', 'READY', 'FAILED'].includes(
+      value.status,
+    ) &&
+    'error' in value &&
+    (value.error === null || typeof value.error === 'string')
+  );
+}
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function getImageHash(image: File) {
+  const digest = await crypto.subtle.digest('SHA-256', await image.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
 }
 
 export default function Home() {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [status, setStatus] = useState<JobStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SubmitResponse | null>(null);
 
@@ -47,32 +123,115 @@ export default function Home() {
     event.preventDefault();
     setIsSubmitting(true);
     setError(null);
+    setStatus('UPLOADING');
+    setResult(null);
 
     try {
       const formData = new FormData(event.currentTarget);
-      const response = await fetch('/api/submit', {
-        method: 'POST',
-        body: formData,
-      });
-      const data: unknown = await response.json().catch(() => null);
+      const image = formData.get('image');
 
-      if (!response.ok) {
+      if (!(image instanceof File) || image.size === 0) {
+        throw new Error('Please upload an image.');
+      }
+
+      const jobResponse = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contentType: image.type,
+          imageHash: await getImageHash(image),
+        }),
+      });
+      const jobData: unknown = await jobResponse.json().catch(() => null);
+
+      if (!jobResponse.ok) {
         const message =
-          typeof data === 'object' &&
-            data !== null &&
-            'error' in data &&
-            typeof data.error === 'string'
-            ? data.error
+          typeof jobData === 'object' &&
+            jobData !== null &&
+            'error' in jobData &&
+            typeof jobData.error === 'string'
+            ? jobData.error
             : 'The icon could not be created.';
 
         throw new Error(message);
       }
 
-      if (!isSubmitResponse(data)) {
-        throw new Error('The server returned an invalid image response.');
+      if (!isJobCreateResponse(jobData)) {
+        throw new Error('The server returned an invalid image job.');
       }
 
-      setResult(data);
+      const uploadResponse = await fetch(jobData.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': image.type },
+        body: image,
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error('The source image could not be uploaded.');
+      }
+
+      setStatus('GENERATING');
+      const generationData = new FormData();
+      generationData.set('jobId', jobData.jobId);
+      generationData.set('prompt', String(formData.get('prompt') ?? ''));
+      generationData.set('style', String(formData.get('style') ?? ''));
+      const generationResponse = await fetch('/api/submit', {
+        method: 'POST',
+        body: generationData,
+      });
+      const generationResult: unknown = await generationResponse
+        .json()
+        .catch(() => null);
+
+      if (!generationResponse.ok) {
+        const message =
+          typeof generationResult === 'object' &&
+            generationResult !== null &&
+            'error' in generationResult &&
+            typeof generationResult.error === 'string'
+            ? generationResult.error
+            : 'The icon could not be generated.';
+
+        throw new Error(message);
+      }
+
+      const revisedPrompt =
+        typeof generationResult === 'object' &&
+        generationResult !== null &&
+        'revisedPrompt' in generationResult &&
+        typeof generationResult.revisedPrompt === 'string'
+          ? generationResult.revisedPrompt
+          : null;
+
+      for (let attempt = 0; attempt < 600; attempt += 1) {
+        setStatus('RESHAPING');
+        await wait(1_500);
+
+        const pollResponse = await fetch(`/api/jobs/${jobData.jobId}`, {
+          cache: 'no-store',
+        });
+        const pollData: unknown = await pollResponse.json().catch(() => null);
+
+        if (!pollResponse.ok || !isJobResponse(pollData)) {
+          throw new Error('The image job could not be checked.');
+        }
+
+        setStatus(pollData.status);
+
+        if (pollData.status === 'FAILED') {
+          throw new Error(pollData.error ?? 'Image reshaping failed.');
+        }
+
+        if (pollData.status === 'READY') {
+          setResult({
+            imageUrls: pollData.imageUrls,
+            revisedPrompt,
+          });
+          return;
+        }
+      }
+
+      throw new Error('Image processing is taking longer than expected.');
     } catch (submissionError) {
       setError(
         submissionError instanceof Error
@@ -178,9 +337,17 @@ export default function Home() {
             disabled={isSubmitting}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-300 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isSubmitting ? 'Creating icon...' : 'Create icon'}
+            {isSubmitting && status && status !== 'READY' && status !== 'FAILED'
+              ? STATUS_LABELS[status]
+              : 'Create icon'}
             <span aria-hidden="true">{isSubmitting ? '⋯' : '→'}</span>
           </button>
+
+          {isSubmitting && status && status !== 'READY' && status !== 'FAILED' && (
+            <p aria-live="polite" className="text-center text-sm text-slate-300">
+              {STATUS_LABELS[status]}
+            </p>
+          )}
 
           {error && (
             <p role="alert" className="text-sm text-rose-300">
@@ -220,8 +387,7 @@ export default function Home() {
               </div>
             ) : (
               <p className="text-sm text-slate-400">
-                The generated image is still being resized. Check the final
-                image bucket shortly.
+                The generated image is too small for the available icon sizes.
               </p>
             )}
             {result.revisedPrompt && (

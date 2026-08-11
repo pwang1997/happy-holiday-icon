@@ -79,8 +79,9 @@ resource "aws_lambda_function" "image_reshaper" {
 
   environment {
     variables = {
-      SOURCE_BUCKET      = aws_s3_bucket.images.bucket
-      DESTINATION_BUCKET = aws_s3_bucket.final_images.bucket
+      SOURCE_BUCKET       = aws_s3_bucket.images.bucket
+      DESTINATION_BUCKET  = aws_s3_bucket.final_images.bucket
+      DYNAMODB_JOBS_TABLE = aws_dynamodb_table.image_jobs.name
     }
   }
 
