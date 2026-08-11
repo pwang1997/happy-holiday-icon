@@ -43,6 +43,17 @@ resource "aws_iam_role_policy" "image_reshaper_s3" {
         Action   = ["s3:PutObject"]
         Resource = "${aws_s3_bucket.final_images.arn}/images/*"
       },
+      {
+        Sid    = "UpdateImageJobs"
+        Effect = "Allow"
+
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:UpdateItem",
+        ]
+
+        Resource = aws_dynamodb_table.image_jobs.arn
+      },
     ]
   })
 }

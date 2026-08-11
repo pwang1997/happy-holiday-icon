@@ -5,6 +5,8 @@ This module provisions two private S3 buckets:
 - `image_bucket_name` / `AWS_S3_BUCKET`: temporary ingest storage. The browser presign endpoint writes here, and current objects expire after the configured retention period. New objects under `images/` trigger the image-reshaping Lambda.
 - `final_image_bucket_name` / `AWS_S3_FINAL_BUCKET`: durable final-image storage. `/api/submit` writes generated PNGs here and returns signed download URLs.
 
+It also provisions `image_jobs_table_name` / `DYNAMODB_JOBS_TABLE`, an on-demand DynamoDB table for transient image job status. Store the status in a `status` attribute and the Unix epoch expiration time in `expires_at`; TTL cleanup is enabled for that attribute.
+
 Both buckets use public-access blocking, ownership enforcement, versioning, AES-256 encryption, CORS, lifecycle cleanup for incomplete uploads, and TLS-only bucket policies.
 
 ## Initialize and apply
@@ -18,7 +20,7 @@ terraform -chdir=infra plan
 terraform -chdir=infra apply
 ```
 
-The HCP Terraform workspace stores the state. Set `AWS_REGION`, `AWS_S3_BUCKET`, and `AWS_S3_FINAL_BUCKET` in the Next.js runtime from the Terraform outputs. Do not put AWS credentials in Terraform variables or commit `.env` files.
+The HCP Terraform workspace stores the state. Set `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_S3_FINAL_BUCKET`, and `DYNAMODB_JOBS_TABLE` in the Next.js runtime from the Terraform outputs. Attach `image_jobs_policy_arn` to the Next.js runtime identity. Do not put AWS credentials in Terraform variables or commit `.env` files.
 
 ## Image reshaping Lambda
 
