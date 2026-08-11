@@ -1,7 +1,8 @@
 import {
-    GetObjectCommand,
-    PutObjectCommand,
-    S3Client,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -60,4 +61,43 @@ export async function getImageDownloadUrl(key: string, expiresIn = 3600) {
     }),
     { expiresIn },
   );
+}
+
+function isMissingS3Object(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const candidate = error as {
+    name?: unknown;
+    $metadata?: { httpStatusCode?: number };
+  };
+
+  return (
+    candidate.name === "NotFound" ||
+    candidate.name === "NoSuchKey" ||
+    candidate.$metadata?.httpStatusCode === 404
+  );
+}
+
+export async function getImageDownloadUrlIfExists(
+  key: string,
+  expiresIn = 3600,
+) {
+  try {
+    await getS3Client().send(
+      new HeadObjectCommand({
+        Bucket: getS3Bucket("AWS_S3_FINAL_BUCKET"),
+        Key: key,
+      }),
+    );
+  } catch (error) {
+    if (isMissingS3Object(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+
+  return getImageDownloadUrl(key, expiresIn);
 }

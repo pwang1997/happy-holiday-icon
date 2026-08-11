@@ -1,6 +1,9 @@
+import {
+  getImageDownloadUrlIfExists,
+  uploadImage,
+} from "@/app/lib/s3";
 import { HumanMessage } from "@langchain/core/messages";
 import { ChatOpenAI, tools } from "@langchain/openai";
-import { getImageDownloadUrl, uploadImage } from "@/app/lib/s3";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -8,15 +11,28 @@ export const maxDuration = 120;
 const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
 const MAX_PROMPT_LENGTH = 500;
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const DERIVATIVE_SIZES = [32, 48, 512] as const;
+const DERIVATIVE_RETRY_DELAYS_MS = [250, 500, 750, 1_000, 1_500, 2_000, 3_000];
 
 const STYLE_INSTRUCTIONS = {
-  playful: "Use a playful, hand-drawn illustration style with warm, friendly shapes.",
-  minimal: "Use a minimal, clean style with simple geometry and plenty of negative space.",
-  vintage: "Use a vintage holiday postcard style with softly textured, nostalgic colors.",
-  festive: "Use a bright, festive style with joyful colors and celebratory details.",
+  playful:
+    "Use a playful, hand-drawn illustration style with warm, friendly shapes.",
+  minimal:
+    "Use a minimal, clean style with simple geometry and plenty of negative space.",
+  vintage:
+    "Use a vintage holiday postcard style with softly textured, nostalgic colors.",
+  festive:
+    "Use a bright, festive style with joyful colors and celebratory details.",
 } as const;
 
 type Style = keyof typeof STYLE_INSTRUCTIONS;
+type DerivativeSize = (typeof DERIVATIVE_SIZES)[number];
+
+type ImageDerivative = {
+  size: DerivativeSize;
+  key: string;
+  url: string;
+};
 
 type ImageGenerationOutput = {
   type?: string;
@@ -30,6 +46,47 @@ function errorResponse(message: string, status: number) {
 
 function isStyle(value: string): value is Style {
   return Object.prototype.hasOwnProperty.call(STYLE_INSTRUCTIONS, value);
+}
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function getAvailableImageDerivatives(
+  imageKey: string,
+): Promise<ImageDerivative[]> {
+  const imageBaseKey = imageKey.replace(/\.[^/.]+$/, "");
+  let availableDerivatives: ImageDerivative[] = [];
+
+  for (
+    let attempt = 0;
+    attempt <= DERIVATIVE_RETRY_DELAYS_MS.length;
+    attempt += 1
+  ) {
+    const candidates = await Promise.all(
+      DERIVATIVE_SIZES.map(async (size) => {
+        const key = `${imageBaseKey}/${size}.webp`;
+        const url = await getImageDownloadUrlIfExists(key);
+
+        return url ? { size, key, url } : null;
+      }),
+    );
+
+    availableDerivatives = candidates.filter(
+      (candidate): candidate is ImageDerivative => candidate !== null,
+    );
+
+    if (
+      availableDerivatives.length === DERIVATIVE_SIZES.length ||
+      attempt === DERIVATIVE_RETRY_DELAYS_MS.length
+    ) {
+      return availableDerivatives;
+    }
+
+    await wait(DERIVATIVE_RETRY_DELAYS_MS[attempt]);
+  }
+
+  return availableDerivatives;
 }
 
 export async function POST(request: Request) {
@@ -150,9 +207,13 @@ export async function POST(request: Request) {
       return errorResponse("The image generator did not return an image.", 502);
     }
 
-    const imageKey = `images/${crypto.randomUUID()}-holiday-icon.png`;
+    const imageBytes = await imageValue.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest("SHA-256", imageBytes);
+    const imageHash = Array.from(new Uint8Array(hashBuffer), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
 
-    let imageUrl: string;
+    const imageKey = `images/${imageHash}-holiday-icon.png`;
 
     try {
       await uploadImage({
@@ -161,7 +222,13 @@ export async function POST(request: Request) {
         contentType: "image/png",
       });
 
-      imageUrl = await getImageDownloadUrl(imageKey);
+      const imageUrls = await getAvailableImageDerivatives(imageKey);
+
+      return Response.json({
+        imageUrls,
+        imageKey,
+        revisedPrompt: imageOutput.revised_prompt ?? null,
+      });
     } catch (error) {
       console.error("Generated image could not be saved to S3", error);
       return errorResponse(
@@ -169,12 +236,6 @@ export async function POST(request: Request) {
         502,
       );
     }
-
-    return Response.json({
-      imageUrl,
-      imageKey,
-      revisedPrompt: imageOutput.revised_prompt ?? null,
-    });
   } catch (error) {
     console.error("Image generation failed", error);
     return errorResponse("Image generation failed. Please try again.", 502);

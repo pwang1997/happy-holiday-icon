@@ -4,7 +4,11 @@ import Image from 'next/image';
 import { useState, type FormEvent } from 'react';
 
 type SubmitResponse = {
-  imageUrl: string;
+  imageUrls: Array<{
+    size: number;
+    key: string;
+    url: string;
+  }>;
   revisedPrompt: string | null;
 };
 
@@ -14,9 +18,21 @@ function isSubmitResponse(value: unknown): value is SubmitResponse {
   }
 
   const response = value as Record<string, unknown>;
+  const imageUrls = response.imageUrls;
 
   return (
-    typeof response.imageUrl === 'string' &&
+    Array.isArray(imageUrls) &&
+    imageUrls.every(
+      (image) =>
+        typeof image === 'object' &&
+        image !== null &&
+        'size' in image &&
+        typeof image.size === 'number' &&
+        'key' in image &&
+        typeof image.key === 'string' &&
+        'url' in image &&
+        typeof image.url === 'string',
+    ) &&
     (response.revisedPrompt === null ||
       typeof response.revisedPrompt === 'string')
   );
@@ -43,9 +59,9 @@ export default function Home() {
       if (!response.ok) {
         const message =
           typeof data === 'object' &&
-          data !== null &&
-          'error' in data &&
-          typeof data.error === 'string'
+            data !== null &&
+            'error' in data &&
+            typeof data.error === 'string'
             ? data.error
             : 'The icon could not be created.';
 
@@ -178,23 +194,36 @@ export default function Home() {
             aria-live="polite"
             className="mt-8 space-y-4 border-t border-white/10 pt-8"
           >
-            <div className="overflow-hidden rounded-2xl bg-slate-900/60">
-              <Image
-                src={result.imageUrl}
-                alt="Generated holiday icon"
-                width={1024}
-                height={1024}
-                unoptimized
-                className="h-auto w-full"
-              />
-            </div>
-            <a
-              href={result.imageUrl}
-              download="happy-holiday-icon.png"
-              className="inline-flex rounded-lg border border-white/15 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-amber-300 hover:text-amber-200"
-            >
-              Download icon
-            </a>
+            {result.imageUrls.length > 0 ? (
+              <div className="grid gap-4 sm:grid-cols-3">
+                {result.imageUrls.map((image) => (
+                  <div key={image.size} className="space-y-3">
+                    <div className={`overflow-hidden rounded-2xl`}>
+                      <Image
+                        src={image.url}
+                        alt={`${image.size}px generated holiday icon`}
+                        width={image.size}
+                        height={image.size}
+                        unoptimized
+                        className="w-auto"
+                      />
+                    </div>
+                    <a
+                      href={image.url}
+                      download={`happy-holiday-icon-${image.size}.webp`}
+                      className="inline-flex rounded-lg border border-white/15 px-3 py-2 text-xs font-medium text-slate-200 transition hover:border-amber-300 hover:text-amber-200"
+                    >
+                      Download {image.size}px
+                    </a>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400">
+                The generated image is still being resized. Check the final
+                image bucket shortly.
+              </p>
+            )}
             {result.revisedPrompt && (
               <p className="text-xs leading-5 text-slate-400">
                 Generated with: {result.revisedPrompt}
