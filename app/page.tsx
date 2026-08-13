@@ -177,6 +177,7 @@ export default function Home() {
       generationData.set('style', String(formData.get('style') ?? ''));
       const generationResponse = await fetch('/api/submit', {
         method: 'POST',
+        credentials: 'same-origin',
         body: generationData,
       });
       const generationResult: unknown = await generationResponse

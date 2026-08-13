@@ -7,6 +7,7 @@ import {
 import { getTemporaryImage, uploadImage } from "@/app/lib/s3";
 import { HumanMessage } from "@langchain/core/messages";
 import { ChatOpenAI, tools } from "@langchain/openai";
+import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -44,7 +45,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message.slice(0, 500) : "Unknown error";
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
 
   if (!apiKey) {
@@ -170,7 +171,8 @@ export async function POST(request: Request) {
       metadata: { jobid: job.jobId },
     });
 
-    return Response.json(
+    const sessionToken = request.cookies.get("session_token")?.value;
+    const submitResponse = NextResponse.json(
       {
         jobId: job.jobId,
         status: "RESHAPING",
@@ -179,6 +181,20 @@ export async function POST(request: Request) {
       },
       { status: 202 },
     );
+
+    if (!sessionToken) {
+      submitResponse.cookies.set({
+        name: "session_token",
+        value: crypto.randomUUID(),
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 365,
+      });
+    }
+
+    return submitResponse;
   } catch (error) {
     const message = errorMessage(error);
     console.error("Image generation failed", error);
