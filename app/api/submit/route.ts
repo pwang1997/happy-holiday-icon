@@ -13,6 +13,7 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 const MAX_PROMPT_LENGTH = 500;
+const MAX_FREE_TRIALS = 5;
 
 const STYLE_INSTRUCTIONS = {
   playful:
@@ -33,6 +34,11 @@ type ImageGenerationOutput = {
   revised_prompt?: string;
 };
 
+type TrialSession = {
+  token: string;
+  count: number;
+};
+
 function errorResponse(message: string, status: number) {
   return Response.json({ error: message }, { status });
 }
@@ -43,6 +49,24 @@ function isStyle(value: string): value is Style {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message.slice(0, 500) : "Unknown error";
+}
+
+function getTrialSession(cookieValue: string | undefined): TrialSession | null {
+  if (!cookieValue) {
+    return { token: crypto.randomUUID(), count: 0 };
+  }
+
+  const match = cookieValue.match(
+    /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):(\d+)$/i,
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const count = Number(match[2]);
+
+  return Number.isSafeInteger(count) ? { token: match[1], count } : null;
 }
 
 export async function POST(request: NextRequest) {
@@ -103,6 +127,21 @@ export async function POST(request: NextRequest) {
 
   if (job.status !== "UPLOADING") {
     return errorResponse("This image job has already started.", 409);
+  }
+
+  const trialSession = getTrialSession(
+    request.cookies.get("session_token")?.value,
+  );
+
+  if (!trialSession) {
+    return errorResponse("The trial session is invalid. Please try again.", 400);
+  }
+
+  if (trialSession.count >= MAX_FREE_TRIALS) {
+    return errorResponse(
+      "Your free trials are used. Log in or connect a wallet to continue.",
+      403,
+    );
   }
 
   try {
@@ -171,7 +210,6 @@ export async function POST(request: NextRequest) {
       metadata: { jobid: job.jobId },
     });
 
-    const sessionToken = request.cookies.get("session_token")?.value;
     const submitResponse = NextResponse.json(
       {
         jobId: job.jobId,
@@ -182,17 +220,15 @@ export async function POST(request: NextRequest) {
       { status: 202 },
     );
 
-    if (!sessionToken) {
-      submitResponse.cookies.set({
-        name: "session_token",
-        value: crypto.randomUUID(),
-        httpOnly: true,
-        sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
-        path: "/",
-        maxAge: 60 * 60 * 24 * 365,
-      });
-    }
+    submitResponse.cookies.set({
+      name: "session_token",
+      value: `${trialSession.token}:${trialSession.count + 1}`,
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365,
+    });
 
     return submitResponse;
   } catch (error) {
