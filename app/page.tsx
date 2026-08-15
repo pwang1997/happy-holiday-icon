@@ -102,7 +102,7 @@ async function getImageHash(image: File) {
   ).join('');
 }
 
-export default function Home() {
+function Page() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [status, setStatus] = useState<JobStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -256,6 +256,20 @@ export default function Home() {
             Upload an image, add a little direction, and choose a style for your
             holiday icon.
           </p>
+          <nav className="mt-5 flex gap-4 text-sm">
+            <a
+              href="/api/auth/login"
+              className="font-medium text-amber-300 hover:text-amber-200"
+            >
+              Sign in
+            </a>
+            <a
+              href="/api/auth/logout"
+              className="font-medium text-slate-400 hover:text-slate-200"
+            >
+              Sign out
+            </a>
+          </nav>
         </header>
 
         <form
@@ -391,3 +405,6 @@ export default function Home() {
     </main>
   );
 }
+
+
+export default Page;

@@ -26,7 +26,7 @@ terraform -chdir=infra plan
 terraform -chdir=infra apply
 ```
 
-The HCP Terraform workspace stores the state. Set `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_S3_FINAL_BUCKET`, `DYNAMODB_JOBS_TABLE`, `COGNITO_USER_POOL_ID`, `COGNITO_WEB_CLIENT_ID`, and `COGNITO_ISSUER` in the Next.js runtime from the Terraform outputs. Attach `image_jobs_policy_arn` to the Next.js runtime identity. Do not put AWS credentials in Terraform variables or commit `.env` files.
+The HCP Terraform workspace stores the state. Set `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_S3_FINAL_BUCKET`, `DYNAMODB_JOBS_TABLE`, `COGNITO_USER_POOL_ID`, `COGNITO_WEB_CLIENT_ID`, `COGNITO_DOMAIN`, and `COGNITO_ISSUER` in the Next.js runtime from the Terraform outputs. The app uses `/api/auth/login`, `/auth/callback`, and `/api/auth/logout` for the Cognito authorization-code flow. Attach `image_jobs_policy_arn` to the Next.js runtime identity. Do not put AWS credentials in Terraform variables or commit `.env` files.
 
 ## Image reshaping Lambda
 

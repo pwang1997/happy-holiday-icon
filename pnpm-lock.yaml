@@ -26,18 +26,27 @@ importers:
       '@langchain/openai':
         specifier: ^1.5.6
         version: 1.5.6(@aws-sdk/credential-provider-node@3.972.78)(@langchain/core@1.2.5(openai@6.49.0(@aws-sdk/credential-provider-node@3.972.78)(@smithy/signature-v4@5.6.12)(zod@4.4.3)))(@smithy/signature-v4@5.6.12)
+      aws-jwt-verify:
+        specifier: ^5.2.1
+        version: 5.2.1
       langchain:
         specifier: ^1.5.5
         version: 1.5.5(@langchain/core@1.2.5(openai@6.49.0(@aws-sdk/credential-provider-node@3.972.78)(@smithy/signature-v4@5.6.12)(zod@4.4.3)))(openai@6.49.0(@aws-sdk/credential-provider-node@3.972.78)(@smithy/signature-v4@5.6.12)(zod@4.4.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       next:
         specifier: 16.3.0
         version: 16.3.0(@babel/core@7.29.7)(@types/node@20.19.43)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      oidc-client-ts:
+        specifier: ^3.5.0
+        version: 3.5.0
       react:
         specifier: 19.2.8
         version: 19.2.8
       react-dom:
         specifier: 19.2.8
         version: 19.2.8(react@19.2.8)
+      react-oidc-context:
+        specifier: ^3.3.1
+        version: 3.3.1(oidc-client-ts@3.5.0)(react@19.2.8)
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4.3.3
@@ -983,6 +992,10 @@ packages:
     resolution: {integrity: sha512-wvUjBtSGN7+7SjNpq/9M2Tg350UZD3q62IFZLbRAR1bSMlCo1ZaeW+BJ+D090e4hIIZLBcTDWe4Mh4jvUDajzQ==}
     engines: {node: '>= 0.4'}
 
+  aws-jwt-verify@5.2.1:
+    resolution: {integrity: sha512-J+buA4M+qvQDk58WXFBLkDodkEX3DDL1ac5XFQPW3opxAsaLXYu5hYnlSHsaBRDBUXBAn695kE/cw/mdyJKwJg==}
+    engines: {node: '>=18.0.0'}
+
   axe-core@4.13.0:
     resolution: {integrity: sha512-UzGt8zg7Ny8djbYMhxl2zuEevVa7r2gJjYY5Lwr1xM7+XU2nd6CkIWFTVcCIbAP63vSz71NaVyyuSk9lHKcy0A==}
     engines: {node: '>=4'}
@@ -1629,6 +1642,10 @@ packages:
     resolution: {integrity: sha512-ZZow9HBI5O6EPgSJLUb8n2NKgmVWTwCvHGwFuJlMjvLFqlGG6pjirPhtdsseaLZjSibD8eegzmYpUZwoIlj2cQ==}
     engines: {node: '>=4.0'}
 
+  jwt-decode@4.0.0:
+    resolution: {integrity: sha512-+KJGIyHgkGuIq3IEBNftfhW/LfWhXUIY6OmyVWjliu5KH1y0fw7VQ8YndE2O4qZdMSd9SqbnC8GOcZEy0Om7sA==}
+    engines: {node: '>=18'}
+
   keyv@4.5.4:
     resolution: {integrity: sha512-oxVHkHR/EJf2CNXnWxRLW6mg7JyCCUcG0DtEGmL2ctUo1PNTin1PUil+r/+4r5MpVgC/fn1kjsx7mjSujKqIpw==}
 
@@ -1865,6 +1882,10 @@ packages:
   obliterator@1.6.1:
     resolution: {integrity: sha512-9WXswnqINnnhOG/5SLimUlzuU1hFJUc8zkwyD59Sd+dPOMf05PmnYG/d6Q7HZ+KmgkZJa1PxRso6QdM3sTNHig==}
 
+  oidc-client-ts@3.5.0:
+    resolution: {integrity: sha512-l2q8l9CTCTOlbX+AnK4p3M+4CEpKpyQhle6blQkdFhm0IsBqsxm15bYaSa11G7pWdsYr6epdsRZxJpCyCRbT8A==}
+    engines: {node: '>=18'}
+
   openai@6.49.0:
     resolution: {integrity: sha512-aYCc0C6L864eR6WSYIwQGyXriw/nIyZx0ObvhzOEVuk0zoBDpynjSbrionWI7q65B5H8jJX0DXR9snEzM6bfPg==}
     peerDependencies:
@@ -1984,6 +2005,13 @@ packages:
 
   react-is@16.13.1:
     resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
+
+  react-oidc-context@3.3.1:
+    resolution: {integrity: sha512-/Azvm9W4DhhOtSDBE73kFInh1b6zZRRfILKbgmk2syExMF0PCYJOn/dGdOOi2BFX8x0rCeUe45NXHU+/+xDcrQ==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      oidc-client-ts: ^3.1.0
+      react: '>=16.14.0'
 
   react@19.2.8:
     resolution: {integrity: sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw==}
@@ -3311,6 +3339,8 @@ snapshots:
     dependencies:
       possible-typed-array-names: 1.1.0
 
+  aws-jwt-verify@5.2.1: {}
+
   axe-core@4.13.0: {}
 
   axobject-query@4.1.0: {}
@@ -4103,6 +4133,8 @@ snapshots:
       object.assign: 4.1.7
       object.values: 1.2.1
 
+  jwt-decode@4.0.0: {}
+
   keyv@4.5.4:
     dependencies:
       json-buffer: 3.0.1
@@ -4320,6 +4352,10 @@ snapshots:
 
   obliterator@1.6.1: {}
 
+  oidc-client-ts@3.5.0:
+    dependencies:
+      jwt-decode: 4.0.0
+
   openai@6.49.0(@aws-sdk/credential-provider-node@3.972.78)(@smithy/signature-v4@5.6.12)(zod@4.4.3):
     optionalDependencies:
       '@aws-sdk/credential-provider-node': 3.972.78
@@ -4420,6 +4456,11 @@ snapshots:
       scheduler: 0.27.0
 
   react-is@16.13.1: {}
+
+  react-oidc-context@3.3.1(oidc-client-ts@3.5.0)(react@19.2.8):
+    dependencies:
+      oidc-client-ts: 3.5.0
+      react: 19.2.8
 
   react@19.2.8: {}
 

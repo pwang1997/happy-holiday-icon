@@ -70,7 +70,7 @@ output "cognito_web_client_id" {
 
 output "cognito_domain" {
   description = "Cognito managed-login domain."
-  value       = aws_cognito_user_pool_domain.web.domain
+  value       = "https://${aws_cognito_user_pool_domain.web.domain}.auth.${var.aws_region}.amazoncognito.com"
 }
 
 output "cognito_issuer" {
@@ -87,6 +87,7 @@ output "app_environment" {
     DYNAMODB_JOBS_TABLE   = aws_dynamodb_table.image_jobs.name
     COGNITO_USER_POOL_ID  = aws_cognito_user_pool.users.id
     COGNITO_WEB_CLIENT_ID = aws_cognito_user_pool_client.web.id
+    COGNITO_DOMAIN        = "https://${aws_cognito_user_pool_domain.web.domain}.auth.${var.aws_region}.amazoncognito.com"
     COGNITO_ISSUER        = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.users.id}"
   }
 }

@@ -1,3 +1,4 @@
+import { authenticateRequest } from "@/app/lib/cognito";
 import {
   getImageJob,
   imageHashFromSourceKey,
@@ -36,7 +37,7 @@ type ImageGenerationOutput = {
 };
 
 function errorResponse(message: string, status: number) {
-  return Response.json({ error: message }, { status });
+  return NextResponse.json({ error: message }, { status });
 }
 
 function isStyle(value: string): value is Style {
@@ -107,17 +108,29 @@ export async function POST(request: NextRequest) {
     return errorResponse("This image job has already started.", 409);
   }
 
-  const trialSession = getTrialSession(
-    request.cookies.get("session_token")?.value,
-  );
-
-  if (!trialSession) {
-    return errorResponse("The trial session is invalid. Please try again.", 400);
+  let authentication;
+  try {
+    authentication = await authenticateRequest(request);
+  } catch (error) {
+    console.error("Unable to verify Cognito session", error);
+    return errorResponse("Authentication is not configured.", 503);
   }
 
-  if (trialSession.count >= MAX_FREE_TRIALS) {
+  if (authentication.kind === "invalid") {
     return errorResponse(
-      "Your free trials are used. Log in or connect a wallet to continue.",
+      "Your sign-in session is invalid. Please sign in again.",
+      401,
+    );
+  }
+
+  const trialSession =
+    authentication.kind === "anonymous"
+      ? getTrialSession(request.cookies.get("session_token")?.value)
+      : null;
+
+  if (trialSession && trialSession.count >= MAX_FREE_TRIALS) {
+    return errorResponse(
+      "Your free trials are used. Sign in to continue.",
       403,
     );
   }
@@ -198,15 +211,17 @@ export async function POST(request: NextRequest) {
       { status: 202 },
     );
 
-    submitResponse.cookies.set({
-      name: "session_token",
-      value: `${trialSession.token}:${trialSession.count + 1}`,
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 365,
-    });
+    if (trialSession) {
+      submitResponse.cookies.set({
+        name: "session_token",
+        value: `${trialSession.token}:${trialSession.count + 1}`,
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 365,
+      });
+    }
 
     return submitResponse;
   } catch (error) {
