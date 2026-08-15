@@ -5,6 +5,7 @@ import {
   updateImageJob,
 } from "@/app/lib/jobs";
 import { getTemporaryImage, uploadImage } from "@/app/lib/s3";
+import { getTrialSession } from "@/app/lib/trial-session";
 import { HumanMessage } from "@langchain/core/messages";
 import { ChatOpenAI, tools } from "@langchain/openai";
 import { NextRequest, NextResponse } from "next/server";
@@ -34,11 +35,6 @@ type ImageGenerationOutput = {
   revised_prompt?: string;
 };
 
-type TrialSession = {
-  token: string;
-  count: number;
-};
-
 function errorResponse(message: string, status: number) {
   return Response.json({ error: message }, { status });
 }
@@ -49,24 +45,6 @@ function isStyle(value: string): value is Style {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message.slice(0, 500) : "Unknown error";
-}
-
-function getTrialSession(cookieValue: string | undefined): TrialSession | null {
-  if (!cookieValue) {
-    return { token: crypto.randomUUID(), count: 0 };
-  }
-
-  const match = cookieValue.match(
-    /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):(\d+)$/i,
-  );
-
-  if (!match) {
-    return null;
-  }
-
-  const count = Number(match[2]);
-
-  return Number.isSafeInteger(count) ? { token: match[1], count } : null;
 }
 
 export async function POST(request: NextRequest) {
