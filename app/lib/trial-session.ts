@@ -1,13 +1,12 @@
 export type TrialSession = {
   token: string;
-  count: number;
 };
 
 export function getTrialSession(
   cookieValue: string | undefined,
 ): TrialSession | null {
   if (!cookieValue) {
-    return { token: crypto.randomUUID(), count: 0 };
+    return { token: crypto.randomUUID() };
   }
 
   const match = cookieValue.match(
@@ -18,7 +17,5 @@ export function getTrialSession(
     return null;
   }
 
-  const count = match[2] === undefined ? 0 : Number(match[2]);
-
-  return Number.isSafeInteger(count) ? { token: match[1], count } : null;
+  return { token: match[1] };
 }

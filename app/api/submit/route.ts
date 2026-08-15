@@ -7,6 +7,11 @@ import {
 } from "@/app/lib/jobs";
 import { getTemporaryImage, uploadImage } from "@/app/lib/s3";
 import { getTrialSession } from "@/app/lib/trial-session";
+import {
+  consumeAnonymousTrial,
+  MAX_FREE_TRIALS,
+  TrialLimitError,
+} from "@/app/lib/usage";
 import { HumanMessage } from "@langchain/core/messages";
 import { ChatOpenAI, tools } from "@langchain/openai";
 import { NextRequest, NextResponse } from "next/server";
@@ -15,8 +20,6 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 const MAX_PROMPT_LENGTH = 500;
-const MAX_FREE_TRIALS = 5;
-
 const STYLE_INSTRUCTIONS = {
   playful:
     "Use a playful, hand-drawn illustration style with warm, friendly shapes.",
@@ -38,6 +41,27 @@ type ImageGenerationOutput = {
 
 function errorResponse(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
+}
+
+function setAnonymousSessionCookie(
+  response: NextResponse,
+  trialSession: ReturnType<typeof getTrialSession>,
+) {
+  if (!trialSession) {
+    return response;
+  }
+
+  response.cookies.set({
+    name: "session_token",
+    value: trialSession.token,
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+
+  return response;
 }
 
 function isStyle(value: string): value is Style {
@@ -128,15 +152,59 @@ export async function POST(request: NextRequest) {
       ? getTrialSession(request.cookies.get("session_token")?.value)
       : null;
 
-  if (trialSession && trialSession.count >= MAX_FREE_TRIALS) {
-    return errorResponse(
-      "Your free trials are used. Sign in to continue.",
-      403,
-    );
+  if (authentication.kind === "anonymous" && !trialSession) {
+    return errorResponse("The trial session is invalid. Please try again.", 400);
   }
 
+  let generationStarted = false;
+
   try {
-    await updateImageJob(job.jobId, { status: "GENERATING", error: null });
+    await updateImageJob(
+      job.jobId,
+      { status: "GENERATING", error: null },
+      "UPLOADING",
+    );
+    generationStarted = true;
+
+    if (trialSession) {
+      try {
+        await consumeAnonymousTrial(trialSession.token);
+      } catch (error) {
+        if (error instanceof TrialLimitError) {
+          await updateImageJob(
+            job.jobId,
+            {
+              status: "FAILED",
+              error: "Anonymous trial limit reached",
+            },
+            "GENERATING",
+          );
+
+          return setAnonymousSessionCookie(
+            errorResponse(
+              `Your ${MAX_FREE_TRIALS} free trials are used. Sign in to continue.`,
+              403,
+            ),
+            trialSession,
+          );
+        }
+
+        console.error("Unable to account for anonymous trial", error);
+        await updateImageJob(
+          job.jobId,
+          {
+            status: "FAILED",
+            error: "Anonymous usage accounting unavailable",
+          },
+          "GENERATING",
+        );
+
+        return setAnonymousSessionCookie(
+          errorResponse("Usage accounting is temporarily unavailable.", 503),
+          trialSession,
+        );
+      }
+    }
 
     const sourceImage = await getTemporaryImage(job.sourceKey);
     const sourceContentType = sourceImage.contentType ?? "image/png";
@@ -193,13 +261,17 @@ export async function POST(request: NextRequest) {
     }
 
     const imageKey = `images/${imageHashFromSourceKey(job.sourceKey)}-holiday-icon.png`;
-    await updateImageJob(job.jobId, { status: "RESHAPING", error: null });
     await uploadImage({
       key: imageKey,
       body: Buffer.from(imageOutput.result, "base64"),
       contentType: "image/png",
       metadata: { jobid: job.jobId },
     });
+    await updateImageJob(
+      job.jobId,
+      { status: "RESHAPING", error: null },
+      "GENERATING",
+    );
 
     const submitResponse = NextResponse.json(
       {
@@ -211,29 +283,26 @@ export async function POST(request: NextRequest) {
       { status: 202 },
     );
 
-    if (trialSession) {
-      submitResponse.cookies.set({
-        name: "session_token",
-        value: `${trialSession.token}:${trialSession.count + 1}`,
-        httpOnly: true,
-        sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
-        path: "/",
-        maxAge: 60 * 60 * 24 * 365,
-      });
-    }
-
-    return submitResponse;
+    return setAnonymousSessionCookie(submitResponse, trialSession);
   } catch (error) {
     const message = errorMessage(error);
     console.error("Image generation failed", error);
 
     try {
-      await updateImageJob(job.jobId, { status: "FAILED", error: message });
+      if (generationStarted) {
+        await updateImageJob(
+          job.jobId,
+          { status: "FAILED", error: message },
+          "GENERATING",
+        );
+      }
     } catch (jobError) {
       console.error("Unable to mark image job as failed", jobError);
     }
 
-    return errorResponse("Image generation failed. Please try again.", 502);
+    return setAnonymousSessionCookie(
+      errorResponse("Image generation failed. Please try again.", 502),
+      trialSession,
+    );
   }
 }

@@ -7,6 +7,8 @@ This module provisions two private S3 buckets:
 
 It also provisions `image_jobs_table_name` / `DYNAMODB_JOBS_TABLE`, an on-demand DynamoDB table for transient image job status. Store the status in a `status` attribute and the Unix epoch expiration time in `expires_at`; TTL cleanup is enabled for that attribute.
 
+It provisions `anonymous_usage_table_name` / `DYNAMODB_USAGE_TABLE`, an on-demand DynamoDB table whose conditional counter enforces five anonymous trials per session. The cookie stores only an opaque session identifier; it does not store usage counts.
+
 It provisions a Cognito user pool and public OAuth web client for the eventual
 login/wallet entitlement flow. The client uses authorization-code flow and has
 no client secret; the application must use PKCE during sign-in. Configure
@@ -26,7 +28,7 @@ terraform -chdir=infra plan
 terraform -chdir=infra apply
 ```
 
-The HCP Terraform workspace stores the state. Set `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_S3_FINAL_BUCKET`, `DYNAMODB_JOBS_TABLE`, `COGNITO_USER_POOL_ID`, `COGNITO_WEB_CLIENT_ID`, `COGNITO_DOMAIN`, and `COGNITO_ISSUER` in the Next.js runtime from the Terraform outputs. The app uses `/api/auth/login`, `/auth/callback`, and `/api/auth/logout` for the Cognito authorization-code flow. Attach `image_jobs_policy_arn` to the Next.js runtime identity. Do not put AWS credentials in Terraform variables or commit `.env` files.
+The HCP Terraform workspace stores the state. Set `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_S3_FINAL_BUCKET`, `DYNAMODB_JOBS_TABLE`, `DYNAMODB_USAGE_TABLE`, `COGNITO_USER_POOL_ID`, `COGNITO_WEB_CLIENT_ID`, `COGNITO_DOMAIN`, and `COGNITO_ISSUER` in the Next.js runtime from the Terraform outputs. The app uses `/api/auth/login`, `/auth/callback`, and `/api/auth/logout` for the Cognito authorization-code flow. Attach `image_jobs_policy_arn` and `anonymous_usage_policy_arn` to the Next.js runtime identity. Do not put AWS credentials in Terraform variables or commit `.env` files.
 
 ## Image reshaping Lambda
 

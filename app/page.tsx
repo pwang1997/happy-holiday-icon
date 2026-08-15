@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 
 type SubmitResponse = {
   imageUrls: Array<{
@@ -107,6 +107,39 @@ function Page() {
   const [status, setStatus] = useState<JobStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SubmitResponse | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    fetch('/api/auth/session', {
+      cache: 'no-store',
+      credentials: 'same-origin',
+    })
+      .then(async (response) => {
+        const data: unknown = await response.json().catch(() => null);
+
+        if (
+          active &&
+          response.ok &&
+          typeof data === 'object' &&
+          data !== null &&
+          'authenticated' in data &&
+          typeof data.authenticated === 'boolean'
+        ) {
+          setIsAuthenticated(data.authenticated);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setIsAuthenticated(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -256,19 +289,22 @@ function Page() {
             Upload an image, add a little direction, and choose a style for your
             holiday icon.
           </p>
-          <nav className="mt-5 flex gap-4 text-sm">
-            <a
-              href="/api/auth/login"
-              className="font-medium text-amber-300 hover:text-amber-200"
-            >
-              Sign in
-            </a>
-            <a
-              href="/api/auth/logout"
-              className="font-medium text-slate-400 hover:text-slate-200"
-            >
-              Sign out
-            </a>
+          <nav aria-label="Account" className="mt-5 flex gap-4 text-sm">
+            {isAuthenticated ? (
+              <a
+                href="/api/auth/logout"
+                className="font-medium text-slate-400 hover:text-slate-200"
+              >
+                Sign out
+              </a>
+            ) : (
+              <a
+                href="/api/auth/login"
+                className="font-medium text-amber-300 hover:text-amber-200"
+              >
+                Sign in
+              </a>
+            )}
           </nav>
         </header>
 

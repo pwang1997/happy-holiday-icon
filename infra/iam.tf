@@ -58,3 +58,25 @@ resource "aws_iam_policy" "nextjs_image_jobs" {
     ]
   })
 }
+
+resource "aws_iam_policy" "nextjs_anonymous_usage" {
+  name        = "${var.project_name}-${var.environment}-anonymous-usage"
+  description = "Allow the Next.js runtime to enforce anonymous image usage limits."
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Sid    = "AnonymousUsage"
+        Effect = "Allow"
+
+        Action = [
+          "dynamodb:UpdateItem",
+        ]
+
+        Resource = aws_dynamodb_table.anonymous_usage.arn
+      },
+    ]
+  })
+}

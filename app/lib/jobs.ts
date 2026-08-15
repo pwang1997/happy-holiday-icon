@@ -151,6 +151,7 @@ export async function updateImageJob(
   jobId: string,
   update: Pick<ImageJob, "status"> &
     Partial<Pick<ImageJob, "derivativeKeys" | "error">>,
+  expectedStatus?: JobStatus,
 ) {
   const updatedAt = nowInSeconds();
   const names: Record<string, string> = {
@@ -162,6 +163,13 @@ export async function updateImageJob(
     ":updatedAt": updatedAt,
   };
   const assignments = ["#status = :status", "#updatedAt = :updatedAt"];
+  let conditionExpression = "attribute_exists(job_id)";
+
+  if (expectedStatus) {
+    names["#expectedStatus"] = "status";
+    values[":expectedStatus"] = expectedStatus;
+    conditionExpression += " AND #expectedStatus = :expectedStatus";
+  }
 
   if (update.derivativeKeys) {
     names["#derivativeKeys"] = "derivative_keys";
@@ -179,7 +187,7 @@ export async function updateImageJob(
     new UpdateCommand({
       TableName: getTableName(),
       Key: { job_id: jobId },
-      ConditionExpression: "attribute_exists(job_id)",
+      ConditionExpression: conditionExpression,
       UpdateExpression: `SET ${assignments.join(", ")}`,
       ExpressionAttributeNames: names,
       ExpressionAttributeValues: values,

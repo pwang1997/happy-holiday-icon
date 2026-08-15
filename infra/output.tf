@@ -43,6 +43,16 @@ output "image_jobs_policy_arn" {
   value       = aws_iam_policy.nextjs_image_jobs.arn
 }
 
+output "anonymous_usage_table_name" {
+  description = "Name of the DynamoDB table used for anonymous usage limits."
+  value       = aws_dynamodb_table.anonymous_usage.name
+}
+
+output "anonymous_usage_policy_arn" {
+  description = "Attach this policy to the identity used by the Next.js runtime."
+  value       = aws_iam_policy.nextjs_anonymous_usage.arn
+}
+
 output "image_reshaper_function_name" {
   description = "Name of the Lambda function that reshapes temporary images."
   value       = aws_lambda_function.image_reshaper.function_name
@@ -85,6 +95,7 @@ output "app_environment" {
     AWS_S3_BUCKET         = aws_s3_bucket.images.bucket
     AWS_S3_FINAL_BUCKET   = aws_s3_bucket.final_images.bucket
     DYNAMODB_JOBS_TABLE   = aws_dynamodb_table.image_jobs.name
+    DYNAMODB_USAGE_TABLE  = aws_dynamodb_table.anonymous_usage.name
     COGNITO_USER_POOL_ID  = aws_cognito_user_pool.users.id
     COGNITO_WEB_CLIENT_ID = aws_cognito_user_pool_client.web.id
     COGNITO_DOMAIN        = "https://${aws_cognito_user_pool_domain.web.domain}.auth.${var.aws_region}.amazoncognito.com"
