@@ -39,17 +39,6 @@ const STATUS_LABELS: Record<Exclude<JobStatus, 'READY' | 'FAILED'>, string> = {
   RESHAPING: 'Reshaping image…',
 };
 
-function isSubmitResponse(value: unknown): value is SubmitResponse {
-  if (!isImageUrlsResponse(value)) {
-    return false;
-  }
-
-  const response = value as Record<string, unknown>;
-  return (
-    response.revisedPrompt === null || typeof response.revisedPrompt === 'string'
-  );
-}
-
 function isImageUrlsResponse(value: unknown): value is ImageUrlsResponse {
   if (typeof value !== 'object' || value === null) {
     return false;
