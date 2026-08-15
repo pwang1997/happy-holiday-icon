@@ -7,5 +7,15 @@ allowed_origins = [
   "https://happy-holiday-icon.vercel.app",
 ]
 
+cognito_callback_urls = [
+  "http://localhost:3000/auth/callback",
+  "https://happy-holiday-icon.vercel.app/auth/callback",
+]
+
+cognito_logout_urls = [
+  "http://localhost:3000",
+  "https://happy-holiday-icon.vercel.app",
+]
+
 # Keep false unless this is a disposable environment.
 force_destroy = false

@@ -53,3 +53,33 @@ variable "temporary_object_retention_days" {
     error_message = "temporary_object_retention_days must be greater than zero."
   }
 }
+
+variable "cognito_callback_urls" {
+  type        = list(string)
+  description = "OAuth callback URLs allowed by the Cognito web client."
+
+  default = [
+    "http://localhost:3000/auth/callback",
+    "https://happy-holiday-icon.vercel.app/auth/callback",
+  ]
+
+  validation {
+    condition     = length(var.cognito_callback_urls) > 0
+    error_message = "cognito_callback_urls must contain at least one callback URL."
+  }
+}
+
+variable "cognito_logout_urls" {
+  type        = list(string)
+  description = "Logout redirect URLs allowed by the Cognito web client."
+
+  default = [
+    "http://localhost:3000",
+    "https://happy-holiday-icon.vercel.app",
+  ]
+
+  validation {
+    condition     = length(var.cognito_logout_urls) > 0
+    error_message = "cognito_logout_urls must contain at least one logout URL."
+  }
+}

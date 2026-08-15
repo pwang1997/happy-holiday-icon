@@ -53,12 +53,40 @@ output "image_reshaper_function_arn" {
   value       = aws_lambda_function.image_reshaper.arn
 }
 
+output "cognito_user_pool_id" {
+  description = "ID of the Cognito user pool used for registered users."
+  value       = aws_cognito_user_pool.users.id
+}
+
+output "cognito_user_pool_arn" {
+  description = "ARN of the Cognito user pool used for registered users."
+  value       = aws_cognito_user_pool.users.arn
+}
+
+output "cognito_web_client_id" {
+  description = "Public OAuth client ID for the browser application."
+  value       = aws_cognito_user_pool_client.web.id
+}
+
+output "cognito_domain" {
+  description = "Cognito managed-login domain."
+  value       = aws_cognito_user_pool_domain.web.domain
+}
+
+output "cognito_issuer" {
+  description = "OIDC issuer used to validate Cognito JWTs."
+  value       = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.users.id}"
+}
+
 output "app_environment" {
   description = "Non-secret environment values required by the Next.js runtime."
   value = {
-    AWS_REGION          = var.aws_region
-    AWS_S3_BUCKET       = aws_s3_bucket.images.bucket
-    AWS_S3_FINAL_BUCKET = aws_s3_bucket.final_images.bucket
-    DYNAMODB_JOBS_TABLE = aws_dynamodb_table.image_jobs.name
+    AWS_REGION            = var.aws_region
+    AWS_S3_BUCKET         = aws_s3_bucket.images.bucket
+    AWS_S3_FINAL_BUCKET   = aws_s3_bucket.final_images.bucket
+    DYNAMODB_JOBS_TABLE   = aws_dynamodb_table.image_jobs.name
+    COGNITO_USER_POOL_ID  = aws_cognito_user_pool.users.id
+    COGNITO_WEB_CLIENT_ID = aws_cognito_user_pool_client.web.id
+    COGNITO_ISSUER        = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.users.id}"
   }
 }
