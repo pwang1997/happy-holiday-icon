@@ -1,10 +1,14 @@
 import { authenticateRequest } from "@/app/lib/cognito";
+import { STYLE_INSTRUCTIONS, type Style } from "@/app/lib/instructions";
 import {
   getImageJob,
   imageHashFromSourceKey,
   isExpired,
   updateImageJob,
 } from "@/app/lib/jobs";
+import ImageGenProvider, {
+  ImageGenerationConfigurationError,
+} from "@/app/lib/llm/image-gen";
 import { getTemporaryImage, uploadImage } from "@/app/lib/s3";
 import { getTrialSession } from "@/app/lib/trial-session";
 import {
@@ -13,32 +17,12 @@ import {
   TrialLimitError,
   type UsageIdentity,
 } from "@/app/lib/usage";
-import { HumanMessage } from "@langchain/core/messages";
-import { ChatOpenAI, tools } from "@langchain/openai";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
 const MAX_PROMPT_LENGTH = 500;
-const STYLE_INSTRUCTIONS = {
-  playful:
-    "Use a playful, hand-drawn illustration style with warm, friendly shapes.",
-  minimal:
-    "Use a minimal, clean style with simple geometry and plenty of negative space.",
-  vintage:
-    "Use a vintage holiday postcard style with softly textured, nostalgic colors.",
-  festive:
-    "Use a bright, festive style with joyful colors and celebratory details.",
-} as const;
-
-type Style = keyof typeof STYLE_INSTRUCTIONS;
-
-type ImageGenerationOutput = {
-  type?: string;
-  result?: string;
-  revised_prompt?: string;
-};
 
 function errorResponse(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
@@ -74,13 +58,17 @@ function errorMessage(error: unknown) {
 }
 
 export async function POST(request: NextRequest) {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  let imageGenerator: ImageGenProvider;
 
-  if (!apiKey) {
-    return errorResponse(
-      "The image generator is not configured. Add OPENAI_API_KEY to the server environment.",
-      503,
-    );
+  try {
+    imageGenerator = new ImageGenProvider();
+  } catch (error) {
+    if (error instanceof ImageGenerationConfigurationError) {
+      return errorResponse(error.message, 503);
+    }
+
+    console.error("Unable to configure image generation", error);
+    return errorResponse("The image generator is not configured.", 503);
   }
 
   let formData: FormData;
@@ -217,61 +205,17 @@ export async function POST(request: NextRequest) {
     const sourceImage = await getTemporaryImage(job.sourceKey);
     const sourceContentType = sourceImage.contentType ?? "image/png";
     const imageDataUrl = `data:${sourceContentType};base64,${sourceImage.body.toString("base64")}`;
-    const instruction = [
-      "Edit the uploaded reference image into a single holiday app icon.",
-      `The requested subject or direction is: ${prompt}`,
-      `The requested visual style is: ${STYLE_INSTRUCTIONS[styleValue]}`,
-      "Keep the main subject recognizable, centered, and legible at small sizes.",
-      "Use a square composition, a clean silhouette, and no text or watermark.",
-      "Return the finished icon as a PNG with a transparent background when possible.",
-    ].join("\n");
-    const model = new ChatOpenAI({
-      apiKey,
-      model: process.env.OPENAI_MODEL?.trim() || "gpt-4o",
-    });
-    const response = await model.invoke(
-      [
-        new HumanMessage({
-          content: [
-            { type: "text", text: instruction },
-            { type: "image_url", image_url: { url: imageDataUrl } },
-          ],
-        }),
-      ],
-      {
-        tools: [
-          tools.imageGeneration({
-            action: "edit",
-            background: "transparent",
-            inputFidelity: "high",
-            model: "gpt-image-1",
-            outputFormat: "png",
-            quality: "medium",
-            size: "1024x1024",
-          }),
-        ],
-        tool_choice: { type: "image_generation" },
-      },
-    );
-    const toolOutputs = response.additional_kwargs?.tool_outputs;
-    const imageOutput = Array.isArray(toolOutputs)
-      ? (toolOutputs.find(
-          (output): output is ImageGenerationOutput =>
-            typeof output === "object" &&
-            output !== null &&
-            "type" in output &&
-            output.type === "image_generation_call",
-        ) as ImageGenerationOutput | undefined)
-      : undefined;
 
-    if (!imageOutput?.result) {
-      throw new Error("The image generator did not return an image.");
-    }
+    const generatedImage = await imageGenerator.generate({
+      imageDataUrl,
+      prompt,
+      style: styleValue,
+    });
 
     const imageKey = `images/${imageHashFromSourceKey(job.sourceKey)}-holiday-icon.png`;
     await uploadImage({
       key: imageKey,
-      body: Buffer.from(imageOutput.result, "base64"),
+      body: Buffer.from(generatedImage.imageBase64, "base64"),
       contentType: "image/png",
       metadata: { jobid: job.jobId },
     });
@@ -286,7 +230,7 @@ export async function POST(request: NextRequest) {
         jobId: job.jobId,
         status: "RESHAPING",
         imageKey,
-        revisedPrompt: imageOutput.revised_prompt ?? null,
+        revisedPrompt: generatedImage.revisedPrompt,
       },
       { status: 202 },
     );

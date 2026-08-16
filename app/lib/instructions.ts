@@ -1,4 +1,4 @@
-const STYLE_INSTRUCTIONS = {
+export const STYLE_INSTRUCTIONS = {
   playful:
     "Use a playful, hand-drawn illustration style with warm, friendly shapes.",
   minimal:
@@ -9,6 +9,4 @@ const STYLE_INSTRUCTIONS = {
     "Use a bright, festive style with joyful colors and celebratory details.",
 } as const;
 
-export {
-    STYLE_INSTRUCTIONS
-};
+export type Style = keyof typeof STYLE_INSTRUCTIONS;

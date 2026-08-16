@@ -9,7 +9,6 @@ type SubmitResponse = {
     key: string;
     url: string;
   }>;
-  revisedPrompt: string | null;
 };
 
 type ImageUrlsResponse = Pick<SubmitResponse, 'imageUrls'>;
@@ -218,14 +217,6 @@ function Page() {
         throw new Error(message);
       }
 
-      const revisedPrompt =
-        typeof generationResult === 'object' &&
-        generationResult !== null &&
-        'revisedPrompt' in generationResult &&
-        typeof generationResult.revisedPrompt === 'string'
-          ? generationResult.revisedPrompt
-          : null;
-
       for (let attempt = 0; attempt < 600; attempt += 1) {
         setStatus('RESHAPING');
         await wait(1_500);
@@ -240,17 +231,14 @@ function Page() {
         }
 
         setStatus(pollData.status);
-
-        if (pollData.status === 'FAILED') {
-          throw new Error(pollData.error ?? 'Image reshaping failed.');
-        }
-
-        if (pollData.status === 'READY') {
-          setResult({
-            imageUrls: pollData.imageUrls,
-            revisedPrompt,
-          });
-          return;
+        switch (pollData.status) {
+          case 'FAILED':
+            throw new Error(pollData.error ?? 'Image reshaping failed.');
+          case 'READY':
+            setResult({imageUrls: pollData.imageUrls});
+            return;
+          default:
+            break;
         }
       }
 
@@ -428,11 +416,6 @@ function Page() {
             ) : (
               <p className="text-sm text-slate-400">
                 The generated image is too small for the available icon sizes.
-              </p>
-            )}
-            {result.revisedPrompt && (
-              <p className="text-xs leading-5 text-slate-400">
-                Generated with: {result.revisedPrompt}
               </p>
             )}
           </section>
