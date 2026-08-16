@@ -8,14 +8,14 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
-  const responseUrl = new URL("/", request.url);
-  let redirectUrl = responseUrl;
+  const logoutUri = request.nextUrl.origin;
+  let redirectUrl = new URL(logoutUri);
 
   try {
     const config = getCognitoConfig();
     redirectUrl = new URL(`${config.domain}/logout`);
     redirectUrl.searchParams.set("client_id", config.clientId);
-    redirectUrl.searchParams.set("logout_uri", responseUrl.toString());
+    redirectUrl.searchParams.set("logout_uri", logoutUri);
   } catch {
     // Local cookie cleanup remains useful when Cognito is not configured.
   }
