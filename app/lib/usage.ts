@@ -17,6 +17,10 @@ export class TrialLimitError extends Error {
   }
 }
 
+export type UsageIdentity =
+  | { kind: "anonymous"; sessionToken: string }
+  | { kind: "authenticated"; subject: string };
+
 const USAGE_TTL_SECONDS = 365 * 24 * 60 * 60;
 let client: DynamoDBDocumentClient | undefined;
 
@@ -52,30 +56,59 @@ function nowInSeconds() {
   return Math.floor(Date.now() / 1000);
 }
 
-function usageId(sessionToken: string) {
-  const digest = createHash("sha256").update(sessionToken).digest("hex");
+function usageId(identity: UsageIdentity) {
+  if (identity.kind === "authenticated") {
+    return `USER#${identity.subject}`;
+  }
+
+  const digest = createHash("sha256")
+    .update(identity.sessionToken)
+    .digest("hex");
   return `ANONYMOUS#${digest}`;
 }
 
-export async function consumeAnonymousTrial(sessionToken: string) {
+export async function recordUsage(identity: UsageIdentity) {
   const now = nowInSeconds();
+  const isAnonymous = identity.kind === "anonymous";
+  const updateParts = [
+    "#usageCount = if_not_exists(#usageCount, :zero) + :one",
+    "#identityType = :identityType",
+    "#createdAt = if_not_exists(#createdAt, :now)",
+    "#updatedAt = :now",
+    "#expiresAt = :expiresAt",
+  ];
+
+  if (isAnonymous) {
+    updateParts.splice(
+      1,
+      0,
+      "#trialCount = if_not_exists(#trialCount, :zero) + :one",
+    );
+  }
+
   const result = await getClient().send(
     new UpdateCommand({
       TableName: getTableName(),
-      Key: { usage_id: usageId(sessionToken) },
-      UpdateExpression:
-        "SET #trialCount = if_not_exists(#trialCount, :zero) + :one, #createdAt = if_not_exists(#createdAt, :now), #updatedAt = :now, #expiresAt = :expiresAt",
-      ConditionExpression:
-        "attribute_not_exists(#trialCount) OR #trialCount < :limit",
+      Key: { usage_id: usageId(identity) },
+      UpdateExpression: `SET ${updateParts.join(", ")}`,
+      ...(isAnonymous
+        ? {
+            ConditionExpression:
+              "attribute_not_exists(#trialCount) OR #trialCount < :limit",
+          }
+        : {}),
       ExpressionAttributeNames: {
         "#createdAt": "created_at",
         "#expiresAt": "expires_at",
-        "#trialCount": "trial_count",
+        ...(isAnonymous ? { "#trialCount": "trial_count" } : {}),
+        "#identityType": "identity_type",
         "#updatedAt": "updated_at",
+        "#usageCount": "usage_count",
       },
       ExpressionAttributeValues: {
         ":expiresAt": now + USAGE_TTL_SECONDS,
-        ":limit": MAX_FREE_TRIALS,
+        ...(isAnonymous ? { ":limit": MAX_FREE_TRIALS } : {}),
+        ":identityType": identity.kind,
         ":now": now,
         ":one": 1,
         ":zero": 0,
@@ -83,12 +116,16 @@ export async function consumeAnonymousTrial(sessionToken: string) {
       ReturnValues: "UPDATED_NEW",
     }),
   ).catch((error: unknown) => {
-    if (error instanceof Error && error.name === "ConditionalCheckFailedException") {
+    if (
+      isAnonymous &&
+      error instanceof Error &&
+      error.name === "ConditionalCheckFailedException"
+    ) {
       throw new TrialLimitError();
     }
 
     throw error;
   });
 
-  return result.Attributes?.trial_count;
+  return result.Attributes?.usage_count;
 }

@@ -8,9 +8,10 @@ import {
 import { getTemporaryImage, uploadImage } from "@/app/lib/s3";
 import { getTrialSession } from "@/app/lib/trial-session";
 import {
-  consumeAnonymousTrial,
   MAX_FREE_TRIALS,
+  recordUsage,
   TrialLimitError,
+  type UsageIdentity,
 } from "@/app/lib/usage";
 import { HumanMessage } from "@langchain/core/messages";
 import { ChatOpenAI, tools } from "@langchain/openai";
@@ -156,6 +157,13 @@ export async function POST(request: NextRequest) {
     return errorResponse("The trial session is invalid. Please try again.", 400);
   }
 
+  const usageIdentity: UsageIdentity | null =
+    authentication.kind === "authenticated"
+      ? { kind: "authenticated", subject: authentication.subject }
+      : trialSession
+        ? { kind: "anonymous", sessionToken: trialSession.token }
+        : null;
+
   let generationStarted = false;
 
   try {
@@ -166,9 +174,9 @@ export async function POST(request: NextRequest) {
     );
     generationStarted = true;
 
-    if (trialSession) {
+    if (usageIdentity) {
       try {
-        await consumeAnonymousTrial(trialSession.token);
+        await recordUsage(usageIdentity);
       } catch (error) {
         if (error instanceof TrialLimitError) {
           await updateImageJob(

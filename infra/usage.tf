@@ -22,6 +22,6 @@ resource "aws_dynamodb_table" "anonymous_usage" {
   }
 
   tags = {
-    DataRole = "anonymous-usage-control"
+    DataRole = "usage-control"
   }
 }

@@ -7,7 +7,7 @@ This module provisions two private S3 buckets:
 
 It also provisions `image_jobs_table_name` / `DYNAMODB_JOBS_TABLE`, an on-demand DynamoDB table for transient image job status. Store the status in a `status` attribute and the Unix epoch expiration time in `expires_at`; TTL cleanup is enabled for that attribute.
 
-It provisions `anonymous_usage_table_name` / `DYNAMODB_USAGE_TABLE`, an on-demand DynamoDB table whose conditional counter enforces five anonymous trials per session. The cookie stores only an opaque session identifier; it does not store usage counts.
+It provisions `anonymous_usage_table_name` / `DYNAMODB_USAGE_TABLE`, an on-demand DynamoDB table that records usage for anonymous sessions and authenticated Cognito users. Its conditional counter enforces five anonymous trials per session. The cookie stores only an opaque session identifier; it does not store usage counts.
 
 It provisions a Cognito user pool and public OAuth web client for the eventual
 login/wallet entitlement flow. The client uses authorization-code flow and has
