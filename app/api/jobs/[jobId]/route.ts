@@ -1,5 +1,8 @@
-import { getImageJob, isExpired } from "@/app/lib/jobs";
-import { getImageDownloadUrlIfExists } from "@/app/lib/s3";
+import { errorResponse } from "@/app/lib/http-responses";
+import {
+  imageJobService,
+  ImageJobServiceError,
+} from "@/app/lib/image-job-service";
 
 export async function GET(
   _request: Request,
@@ -8,44 +11,13 @@ export async function GET(
   const { jobId } = await params;
 
   try {
-    const job = await getImageJob(jobId);
-
-    if (!job || isExpired(job)) {
-      return Response.json({ error: "Image job not found." }, { status: 404 });
+    return Response.json(await imageJobService.getImageJobStatus(jobId));
+  } catch (error) {
+    if (error instanceof ImageJobServiceError) {
+      return errorResponse(error.message, error.status);
     }
 
-    const derivatives =
-      job.status === "READY"
-        ? await Promise.all(
-            job.derivativeKeys.map(async (key) => ({
-              key,
-              size: Number(key.match(/\/(32|48|512)\.webp$/)?.[1]),
-              url: await getImageDownloadUrlIfExists(key),
-            })),
-          )
-        : [];
-
-    return Response.json({
-      jobId: job.jobId,
-      status: job.status,
-      sourceKey: job.sourceKey,
-      derivativeKeys: job.derivativeKeys,
-      imageUrls: derivatives
-        .filter(
-          (derivative): derivative is { key: string; size: number; url: string } =>
-            Number.isFinite(derivative.size) && derivative.url !== null,
-        )
-        .map(({ key, size, url }) => ({ key, size, url })),
-      error: job.error,
-      createdAt: job.createdAt,
-      updatedAt: job.updatedAt,
-      expiresAt: job.expiresAt,
-    });
-  } catch (error) {
     console.error("Unable to read image job", error);
-    return Response.json(
-      { error: "Unable to read the image job." },
-      { status: 503 },
-    );
+    return errorResponse("Unable to read the image job.", 503);
   }
 }
