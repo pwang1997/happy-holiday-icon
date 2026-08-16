@@ -1,11 +1,8 @@
-import { PutObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import {
   createImageJob,
-  extensionForContentType,
   isImageHash,
 } from "@/app/lib/jobs";
-import { getS3Client, getTemporaryImageBucket } from "@/app/lib/s3";
+import { getTemporaryImageUploadUrl } from "@/app/lib/s3";
 
 export const runtime = "nodejs";
 
@@ -36,16 +33,10 @@ export async function POST(request: Request) {
 
   try {
     const contentType = payload.contentType;
-    extensionForContentType(contentType);
     const job = await createImageJob(contentType, payload.imageHash);
-    const uploadUrl = await getSignedUrl(
-      getS3Client(),
-      new PutObjectCommand({
-        Bucket: getTemporaryImageBucket(),
-        Key: job.sourceKey,
-        ContentType: contentType,
-      }),
-      { expiresIn: 60 },
+    const uploadUrl = await getTemporaryImageUploadUrl(
+      job.sourceKey,
+      contentType,
     );
 
     return Response.json(

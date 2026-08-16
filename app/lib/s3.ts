@@ -38,6 +38,22 @@ export function getTemporaryImageBucket() {
   return getS3Bucket("AWS_S3_BUCKET");
 }
 
+export async function getTemporaryImageUploadUrl(
+  key: string,
+  contentType: string,
+  expiresIn = 60,
+) {
+  return getSignedUrl(
+    getS3Client(),
+    new PutObjectCommand({
+      Bucket: getTemporaryImageBucket(),
+      Key: key,
+      ContentType: contentType,
+    }),
+    { expiresIn },
+  );
+}
+
 export async function uploadImage({
   key,
   body,
