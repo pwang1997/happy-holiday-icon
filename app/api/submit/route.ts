@@ -12,7 +12,6 @@ import { getTrialSession } from "@/app/lib/trial-session";
 import type { UsageIdentity } from "@/app/lib/usage";
 import { NextRequest, NextResponse } from "next/server";
 
-export const runtime = "nodejs";
 export const maxDuration = 120;
 
 function errorResponse(message: string, status: number) {

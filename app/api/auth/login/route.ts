@@ -6,8 +6,6 @@ import {
 } from "@/app/lib/cognito";
 import { NextRequest, NextResponse } from "next/server";
 
-export const runtime = "nodejs";
-
 function randomToken() {
   return Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString(
     "base64url",

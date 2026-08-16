@@ -9,8 +9,6 @@ import {
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
-export const runtime = "nodejs";
-
 type TokenResponse = {
   access_token?: unknown;
   expires_in?: unknown;

@@ -4,8 +4,6 @@ import {
 } from "@/app/lib/jobs";
 import { getTemporaryImageUploadUrl } from "@/app/lib/s3";
 
-export const runtime = "nodejs";
-
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 export async function POST(request: Request) {

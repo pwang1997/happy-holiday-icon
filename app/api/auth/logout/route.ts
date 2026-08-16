@@ -5,8 +5,6 @@ import {
 } from "@/app/lib/cognito";
 import { NextRequest, NextResponse } from "next/server";
 
-export const runtime = "nodejs";
-
 export async function GET(request: NextRequest) {
   const logoutUri = request.nextUrl.origin;
   let redirectUrl = new URL(logoutUri);

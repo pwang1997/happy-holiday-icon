@@ -1,8 +1,6 @@
 import { getImageJob, isExpired } from "@/app/lib/jobs";
 import { getImageDownloadUrlIfExists } from "@/app/lib/s3";
 
-export const runtime = "nodejs";
-
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ jobId: string }> },
