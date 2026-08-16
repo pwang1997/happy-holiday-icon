@@ -2,14 +2,8 @@
 
 import Image from 'next/image';
 import { useEffect, useState, type FormEvent } from 'react';
-import {
-  isImageJobCreationResponse,
-  isImageJobStatusResponse,
-  type ImageJobStatus,
-  type ImageJobStatusResponse,
-} from './lib/image-job-contract';
-
-type SubmitResponse = Pick<ImageJobStatusResponse, 'imageUrls'>;
+import { useImageJob } from './hooks/use-image-job';
+import type { ImageJobStatus } from './lib/image-job-contract';
 
 const STATUS_LABELS: Record<
   Exclude<ImageJobStatus, 'READY' | 'FAILED'>,
@@ -20,23 +14,9 @@ const STATUS_LABELS: Record<
   RESHAPING: 'Reshaping image…',
 };
 
-function wait(milliseconds: number) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-async function getImageHash(image: File) {
-  const digest = await crypto.subtle.digest('SHA-256', await image.arrayBuffer());
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, '0'),
-  ).join('');
-}
-
 function Page() {
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [status, setStatus] = useState<ImageJobStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<SubmitResponse | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const { error, imageUrls, isSubmitting, status, submit } = useImageJob();
 
   useEffect(() => {
     let active = true;
@@ -72,116 +52,7 @@ function Page() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsSubmitting(true);
-    setError(null);
-    setStatus('UPLOADING');
-    setResult(null);
-
-    try {
-      const formData = new FormData(event.currentTarget);
-      const image = formData.get('image');
-
-      if (!(image instanceof File) || image.size === 0) {
-        throw new Error('Please upload an image.');
-      }
-
-      const jobResponse = await fetch('/api/jobs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contentType: image.type,
-          imageHash: await getImageHash(image),
-        }),
-      });
-      const jobData: unknown = await jobResponse.json().catch(() => null);
-
-      if (!jobResponse.ok) {
-        const message =
-          typeof jobData === 'object' &&
-            jobData !== null &&
-            'error' in jobData &&
-            typeof jobData.error === 'string'
-            ? jobData.error
-            : 'The icon could not be created.';
-
-        throw new Error(message);
-      }
-
-      if (!isImageJobCreationResponse(jobData)) {
-        throw new Error('The server returned an invalid image job.');
-      }
-
-      const uploadResponse = await fetch(jobData.uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': image.type },
-        body: image,
-      });
-
-      if (!uploadResponse.ok) {
-        throw new Error('The source image could not be uploaded.');
-      }
-
-      setStatus('GENERATING');
-      const generationData = new FormData();
-      generationData.set('jobId', jobData.jobId);
-      generationData.set('prompt', String(formData.get('prompt') ?? ''));
-      generationData.set('style', String(formData.get('style') ?? ''));
-      const generationResponse = await fetch('/api/submit', {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: generationData,
-      });
-      const generationResult: unknown = await generationResponse
-        .json()
-        .catch(() => null);
-
-      if (!generationResponse.ok) {
-        const message =
-          typeof generationResult === 'object' &&
-            generationResult !== null &&
-            'error' in generationResult &&
-            typeof generationResult.error === 'string'
-            ? generationResult.error
-            : 'The icon could not be generated.';
-
-        throw new Error(message);
-      }
-
-      for (let attempt = 0; attempt < 600; attempt += 1) {
-        setStatus('RESHAPING');
-        await wait(1_500);
-
-        const pollResponse = await fetch(`/api/jobs/${jobData.jobId}`, {
-          cache: 'no-store',
-        });
-        const pollData: unknown = await pollResponse.json().catch(() => null);
-
-        if (!pollResponse.ok || !isImageJobStatusResponse(pollData)) {
-          throw new Error('The image job could not be checked.');
-        }
-
-        setStatus(pollData.status);
-        switch (pollData.status) {
-          case 'FAILED':
-            throw new Error(pollData.error ?? 'Image reshaping failed.');
-          case 'READY':
-            setResult({imageUrls: pollData.imageUrls});
-            return;
-          default:
-            break;
-        }
-      }
-
-      throw new Error('Image processing is taking longer than expected.');
-    } catch (submissionError) {
-      setError(
-        submissionError instanceof Error
-          ? submissionError.message
-          : 'The icon could not be created.',
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
+    await submit(new FormData(event.currentTarget));
   }
 
   return (
@@ -314,14 +185,14 @@ function Page() {
           )}
         </form>
 
-        {result && (
+        {imageUrls && (
           <section
             aria-live="polite"
             className="mt-8 space-y-4 border-t border-white/10 pt-8"
           >
-            {result.imageUrls.length > 0 ? (
+            {imageUrls.length > 0 ? (
               <div className="grid gap-4 sm:grid-cols-3">
-                {result.imageUrls.map((image) => (
+                {imageUrls.map((image) => (
                   <div key={image.size} className="space-y-3">
                     <div className={`overflow-hidden rounded-2xl`}>
                       <Image
