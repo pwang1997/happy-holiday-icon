@@ -1,4 +1,4 @@
-# Happy Holiday Icon
+# Happy Holiday Icon ![](happy-holiday-icon.png)
 
 Happy Holiday Icon turns an uploaded PNG, JPEG, or WebP image into a holiday vibed icon, then produces optimized WebP derivatives at 32px, 48px, and 512px. 
 
