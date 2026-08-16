@@ -1,0 +1,492 @@
+openapi: 3.1.0
+info:
+  title: Happy Holiday Icon API
+  version: 1.0.0
+  description: |
+    Creates holiday icons from uploaded images. The browser uploads source files
+    directly to S3 with a presigned URL, then submits the image job for
+    generation. Image reshaping is asynchronous; clients poll the job endpoint
+    until signed WebP download URLs are available.
+servers:
+  - url: http://localhost:3000
+    description: Local development
+tags:
+  - name: Jobs
+    description: Image job creation, submission, and polling.
+  - name: Authentication
+    description: Cognito managed-login session endpoints.
+paths:
+  /api/jobs:
+    post:
+      tags: [Jobs]
+      operationId: createImageJob
+      summary: Create an image job and a presigned source upload URL
+      description: |
+        Creates an `UPLOADING` job record and returns a 60-second presigned S3
+        PUT URL. Upload the source bytes to `uploadUrl` with the same
+        `Content-Type` supplied in this request before calling `/api/submit`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateImageJobRequest'
+      responses:
+        '201':
+          description: Image job created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedImageJob'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '415':
+          description: The supplied image content type is not supported.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Only PNG, JPG, and WEBP images are supported.
+        '503':
+          description: S3 or DynamoDB is unavailable or not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/jobs/{jobId}:
+    get:
+      tags: [Jobs]
+      operationId: getImageJob
+      summary: Get image job status and finished derivatives
+      description: |
+        Returns an image job's current state. When the job is `READY`,
+        `imageUrls` contains signed final-bucket download URLs for derivatives
+        that were created. Job expiry is checked by the application even though
+        DynamoDB TTL deletion is asynchronous.
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Current image job state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageJob'
+        '404':
+          description: The job does not exist or has expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: DynamoDB or S3 is unavailable or not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/submit:
+    post:
+      tags: [Jobs]
+      operationId: submitImageJob
+      summary: Generate an icon from an uploaded image job
+      description: |
+        Reads the previously uploaded source image, records usage, and asks
+        OpenAI to generate an icon. The response is returned after the generated
+        PNG reaches the temporary bucket and before the S3-triggered Lambda has
+        finished creating WebP derivatives. Poll `GET /api/jobs/{jobId}` for
+        final signed URLs.
+
+        A valid Cognito access token can be sent as a bearer token or the
+        `cognito_access_token` HTTP-only cookie. Requests without a Cognito
+        session use the anonymous five-trial allowance; the server returns a
+        `session_token` cookie for that path.
+      security:
+        - bearerAuth: []
+        - cognitoAccessToken: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [jobId, prompt, style]
+              properties:
+                jobId:
+                  type: string
+                  format: uuid
+                  description: The `jobId` returned by `POST /api/jobs`.
+                prompt:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  description: A non-whitespace description of the desired icon.
+                style:
+                  $ref: '#/components/schemas/IconStyle'
+      responses:
+        '202':
+          description: |
+            Generation completed and derivative processing has begun. The final
+            job state will be `READY` or `FAILED`.
+          headers:
+            Set-Cookie:
+              description: Sent for anonymous requests to create or refresh the HTTP-only trial session.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitAccepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: The supplied Cognito access token is invalid or expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: The anonymous session has used all five trials.
+          headers:
+            Set-Cookie:
+              description: Refreshes the anonymous HTTP-only trial session cookie.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: The image job does not exist or has expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The image job is no longer in the `UPLOADING` state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Image generation failed after the generation attempt started.
+          headers:
+            Set-Cookie:
+              description: Sent for anonymous requests to preserve the trial session.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: A required OpenAI, Cognito, DynamoDB, or S3 dependency is unavailable or not configured.
+          headers:
+            Set-Cookie:
+              description: May be sent for anonymous requests after a trial session is created.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/auth/login:
+    get:
+      tags: [Authentication]
+      operationId: startCognitoLogin
+      summary: Start Cognito managed login with PKCE
+      description: |
+        Creates short-lived HTTP-only PKCE verifier and state cookies, then
+        redirects to the configured Cognito authorization endpoint.
+      responses:
+        '307':
+          description: Redirect to Cognito managed login.
+          headers:
+            Location:
+              required: true
+              schema:
+                type: string
+                format: uri
+            Set-Cookie:
+              description: Short-lived HTTP-only OAuth state and PKCE verifier cookies.
+              schema:
+                type: string
+        '503':
+          description: Cognito is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /auth/callback:
+    get:
+      tags: [Authentication]
+      operationId: completeCognitoLogin
+      summary: Complete the Cognito authorization-code flow
+      description: |
+        Validates the OAuth state and exchanges the authorization code with
+        Cognito. On success it stores HTTP-only access and refresh token cookies
+        before redirecting to the application root.
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Authorization code from Cognito. Required for a successful sign-in.
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+          description: OAuth state returned by Cognito. Required for a successful sign-in.
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Cognito error code when the sign-in was cancelled or denied.
+      responses:
+        '307':
+          description: Sign-in completed; redirect to the application root.
+          headers:
+            Location:
+              required: true
+              schema:
+                type: string
+                format: uri-reference
+            Set-Cookie:
+              description: HTTP-only Cognito access and refresh token cookies; OAuth state cookies are cleared.
+              schema:
+                type: string
+        '400':
+          description: Sign-in was cancelled, denied, or the OAuth session is invalid or expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: The authorization-code exchange with Cognito failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/auth/logout:
+    get:
+      tags: [Authentication]
+      operationId: logout
+      summary: Clear the Cognito session
+      description: |
+        Clears local HTTP-only access and refresh token cookies. When Cognito is
+        configured, it also redirects through the Cognito logout endpoint;
+        otherwise it redirects to the application root.
+      responses:
+        '307':
+          description: Redirect to Cognito logout or the application root.
+          headers:
+            Location:
+              required: true
+              schema:
+                type: string
+                format: uri-reference
+            Set-Cookie:
+              description: Clears the local HTTP-only Cognito access and refresh token cookies.
+              schema:
+                type: string
+  /api/auth/session:
+    get:
+      tags: [Authentication]
+      operationId: getSession
+      summary: Check the current Cognito session
+      description: |
+        Reads a bearer token or the `cognito_access_token` cookie and validates
+        it against the configured Cognito user pool. No token is treated as an
+        anonymous session.
+      security:
+        - bearerAuth: []
+        - cognitoAccessToken: []
+        - {}
+      responses:
+        '200':
+          description: The request has a valid Cognito session or is anonymous.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionStatus'
+        '401':
+          description: A supplied Cognito access token is invalid or expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionStatus'
+              example:
+                authenticated: false
+        '503':
+          description: Cognito authentication is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  parameters:
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      description: UUID assigned when the image job is created.
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: The request body, form data, or trial session is invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    CreateImageJobRequest:
+      type: object
+      required: [contentType, imageHash]
+      properties:
+        contentType:
+          type: string
+          enum: [image/png, image/jpeg, image/webp]
+          description: MIME type that will be used for the presigned S3 PUT request.
+        imageHash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Lowercase SHA-256 hash of the original image binary.
+      example:
+        contentType: image/png
+        imageHash: 0d4f1ccad3e65f934b34a24731d1f4ac3d03b7eec1f8e8b2a9a21c17af6d0b46
+    CreatedImageJob:
+      type: object
+      required: [jobId, status, sourceKey, uploadUrl, expiresAt]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          const: UPLOADING
+        sourceKey:
+          type: string
+          description: Private temporary-bucket object key for the source upload.
+          example: uploads/0d4f1ccad3e65f934b34a24731d1f4ac3d03b7eec1f8e8b2a9a21c17af6d0b46/source.png
+        uploadUrl:
+          type: string
+          format: uri
+          description: Presigned temporary-bucket PUT URL, valid for 60 seconds.
+        expiresAt:
+          type: integer
+          format: int64
+          description: Unix epoch seconds when the job expires.
+    SubmitAccepted:
+      type: object
+      required: [jobId, status, imageKey, revisedPrompt]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          const: RESHAPING
+        imageKey:
+          type: string
+          description: Generated PNG object key in the temporary bucket.
+          example: images/0d4f1ccad3e65f934b34a24731d1f4ac3d03b7eec1f8e8b2a9a21c17af6d0b46-holiday-icon.png
+        revisedPrompt:
+          type: [string, 'null']
+          description: Revised prompt returned by the image-generation provider, when available.
+    ImageJob:
+      type: object
+      required:
+        - jobId
+        - status
+        - sourceKey
+        - derivativeKeys
+        - imageUrls
+        - error
+        - createdAt
+        - updatedAt
+        - expiresAt
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        sourceKey:
+          type: string
+          description: Private temporary-bucket source object key.
+        derivativeKeys:
+          type: array
+          description: Final-bucket derivative object keys recorded by the Lambda.
+          items:
+            type: string
+        imageUrls:
+          type: array
+          description: Signed final-bucket URLs. Empty until `READY`, or when no derivative size is eligible.
+          items:
+            $ref: '#/components/schemas/ImageUrl'
+        error:
+          type: [string, 'null']
+          description: Failure reason when `status` is `FAILED`.
+        createdAt:
+          type: integer
+          format: int64
+          description: Unix epoch seconds.
+        updatedAt:
+          type: integer
+          format: int64
+          description: Unix epoch seconds.
+        expiresAt:
+          type: integer
+          format: int64
+          description: Unix epoch seconds; expired jobs return 404.
+    ImageUrl:
+      type: object
+      required: [key, size, url]
+      properties:
+        key:
+          type: string
+          description: Final-bucket WebP derivative key.
+          example: images/0d4f1ccad3e65f934b34a24731d1f4ac3d03b7eec1f8e8b2a9a21c17af6d0b46-holiday-icon/512.webp
+        size:
+          type: integer
+          enum: [32, 48, 512]
+          description: Square width and height of the derivative in pixels.
+        url:
+          type: string
+          format: uri
+          description: Short-lived signed GET URL for the final image.
+    JobStatus:
+      type: string
+      enum: [UPLOADING, GENERATING, RESHAPING, READY, FAILED]
+    IconStyle:
+      type: string
+      enum: [playful, minimal, vintage, festive]
+    SessionStatus:
+      type: object
+      required: [authenticated]
+      properties:
+        authenticated:
+          type: boolean
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Cognito access token sent in the Authorization header.
+    cognitoAccessToken:
+      type: apiKey
+      in: cookie
+      name: cognito_access_token
+      description: HTTP-only Cognito access-token cookie established by the login callback.

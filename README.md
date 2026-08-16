@@ -1,36 +1,80 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Happy Holiday Icon
 
-## Getting Started
+Happy Holiday Icon turns an uploaded PNG, JPEG, or WebP image into a holiday vibed icon, then produces optimized WebP derivatives at 32px, 48px, and 512px. 
 
-First, run the development server:
+## Run
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+git clone https://github.com/pwang1997/happy-holiday-icon.git
+cd happy-holiday-icon
+pnpm install
+pnpm run dev
+```
+The command starts the Web UI, served at http://127.0.0.1:3000 by default.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  Browser[Browser]
+  Next[Next.js App Router]
+  OpenAI[OpenAI image generation]
+
+  subgraph AWS[AWS provisioned by Terraform]
+    TemporaryS3[Temporary S3 bucket]
+    FinalS3[Final S3 bucket]
+    Jobs[(DynamoDB image jobs)]
+    Usage[(DynamoDB usage)]
+    Lambda[Image reshaper Lambda and Sharp]
+    Cognito[Amazon Cognito]
+  end
+
+  HCP[HCP Terraform] -. provisions .-> TemporaryS3
+  HCP -. provisions .-> FinalS3
+  HCP -. provisions .-> Jobs
+  HCP -. provisions .-> Usage
+  HCP -. provisions .-> Lambda
+  HCP -. provisions .-> Cognito
+
+  Browser -->|POST /api/jobs| Next
+  Next -->|create UPLOADING job| Jobs
+  Next -->|presigned PUT URL| Browser
+  Browser -->|PUT uploads source image| TemporaryS3
+
+  Browser -->|POST /api/submit| Next
+  Next <-->|PKCE sign-in and access token| Cognito
+  Next -->|record usage| Usage
+  Next -->|read uploaded source| TemporaryS3
+  Next -->|image edit request| OpenAI
+  OpenAI -->|generated PNG| Next
+  Next -->|PUT images generated icon| TemporaryS3
+  Next -->|GENERATING then RESHAPING| Jobs
+
+  TemporaryS3 -->|ObjectCreated under images| Lambda
+  Lambda -->|read generated PNG| TemporaryS3
+  Lambda -->|write 32, 48, 512 WebP| FinalS3
+  Lambda -->|READY or FAILED and derivative keys| Jobs
+
+  Browser -->|poll GET /api/jobs jobId| Next
+  Next -->|read job and sign final URLs| Jobs
+  Next -->|HEAD and presign GET| FinalS3
+  Next -->|status and signed URLs| Browser
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## API contract
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+[`openapi.yaml`](openapi.yaml) documents the seven App Router endpoints for **job creation**, **submission**, **polling**, and **Cognito auth**. It includes request schemas, response states, error cases, optional bearer or cookie authentication, and the presigned S3 upload handoff.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Provision infrastructure
 
-## Learn More
+The Terraform module is in [`infra/`](infra/README.md). It is configured to use the HCP Terraform organization, project, and `dev` workspace declared in `infra/versions.tf`.
 
-To learn more about Next.js, take a look at the following resources:
+```sh
+./infra/lambda/build.sh
+terraform -chdir=infra init
+terraform -chdir=infra validate
+terraform -chdir=infra plan
+terraform -chdir=infra apply
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Configure the Next.js runtime from the `app_environment` Terraform output. Attach `image_upload_policy_arn`, `image_jobs_policy_arn`, and `anonymous_usage_policy_arn` to its runtime identity. Terraform configures the Lambda execution role, S3 notification, and Lambda access automatically.
