@@ -1,13 +1,9 @@
 import { NextResponse } from "next/server";
-import { getTrialSession } from "./trial-session";
+import type { TrialSession } from "./trial-session";
 
-export function errorResponse(message: string, status: number) {
-  return NextResponse.json({ error: message }, { status });
-}
-
-export function setAnonymousSessionCookie(
+export function setTrialSessionCookie(
   response: NextResponse,
-  trialSession: ReturnType<typeof getTrialSession>,
+  trialSession: TrialSession | null,
 ) {
   if (!trialSession) {
     return response;

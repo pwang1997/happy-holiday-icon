@@ -1,4 +1,4 @@
-import { errorResponse, setAnonymousSessionCookie } from "@/app/lib/apis";
+import { errorResponse } from "@/app/lib/http-responses";
 import {
   getSubmissionAuth,
   SubmissionAuthenticationError,
@@ -12,6 +12,7 @@ import {
 import ImageGenProvider, {
   ImageGenerationConfigurationError,
 } from "@/app/lib/llm/image-gen";
+import { setTrialSessionCookie } from "@/app/lib/trial-session-cookie";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
       usageIdentity,
     });
 
-    return setAnonymousSessionCookie(
+    return setTrialSessionCookie(
       NextResponse.json(
         {
           jobId: input.jobId,
@@ -84,14 +85,14 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     if (error instanceof ImageSubmissionError) {
-      return setAnonymousSessionCookie(
+      return setTrialSessionCookie(
         errorResponse(error.message, error.status),
         trialSession,
       );
     }
 
     console.error("Unable to submit image job", error);
-    return setAnonymousSessionCookie(
+    return setTrialSessionCookie(
       errorResponse("Image generation failed. Please try again.", 502),
       trialSession,
     );
