@@ -1,5 +1,8 @@
 import { errorResponse, setAnonymousSessionCookie } from "@/app/lib/apis";
-import { getUserAuth } from "@/app/lib/auth-service";
+import {
+  getSubmissionAuth,
+  SubmissionAuthenticationError,
+} from "@/app/lib/auth-service";
 import {
   ImageSubmissionError,
   parseImageSubmission,
@@ -46,7 +49,20 @@ export async function POST(request: NextRequest) {
     return errorResponse("The form submission could not be read.", 400);
   }
 
-  const { trialSession, usageIdentity } = await getUserAuth(request);
+  let submissionAuth;
+
+  try {
+    submissionAuth = await getSubmissionAuth(request);
+  } catch (error) {
+    if (error instanceof SubmissionAuthenticationError) {
+      return errorResponse(error.message, error.status);
+    }
+
+    console.error("Unable to resolve submission authentication", error);
+    return errorResponse("Authentication is not configured.", 503);
+  }
+
+  const { trialSession, usageIdentity } = submissionAuth;
 
   try {
     const result = await submitImageJob({
