@@ -3,8 +3,11 @@ import {
   getImageJob,
   isExpired,
   isImageHash,
-  type ImageJob,
 } from "./jobs";
+import type {
+  ImageJobCreationResponse,
+  ImageJobStatusResponse,
+} from "./image-job-contract";
 import {
   getImageDownloadUrlIfExists,
   getTemporaryImageUploadUrl,
@@ -29,24 +32,12 @@ export class ImageJobServiceError extends Error {
   }
 }
 
-export type ImageJobCreation = {
+export type ImageJobCreationInput = {
   contentType: string;
   imageHash: string;
 };
 
-export type ImageJobStatus = {
-  jobId: string;
-  status: ImageJob["status"];
-  sourceKey: string;
-  derivativeKeys: string[];
-  imageUrls: Array<{ key: string; size: number; url: string }>;
-  error: string | null;
-  createdAt: number;
-  updatedAt: number;
-  expiresAt: number;
-};
-
-export function parseImageJobCreation(payload: unknown): ImageJobCreation {
+export function parseImageJobCreation(payload: unknown): ImageJobCreationInput {
   if (!payload || typeof payload !== "object") {
     throw new ImageJobServiceError("Request body must be JSON.", 400);
   }
@@ -79,21 +70,23 @@ export function createImageJobService({
   getTemporaryImageUploadUrl: getUploadUrl,
 }: ImageJobServiceDependencies) {
   return {
-    async createImageUploadJob(payload: unknown) {
+    async createImageUploadJob(
+      payload: unknown,
+    ): Promise<ImageJobCreationResponse> {
       const { contentType, imageHash } = parseImageJobCreation(payload);
       const job = await createJob(contentType, imageHash);
       const uploadUrl = await getUploadUrl(job.sourceKey, contentType);
 
       return {
         jobId: job.jobId,
-        status: job.status,
+        status: "UPLOADING",
         sourceKey: job.sourceKey,
         uploadUrl,
         expiresAt: job.expiresAt,
       };
     },
 
-    async getImageJobStatus(jobId: string): Promise<ImageJobStatus> {
+    async getImageJobStatus(jobId: string): Promise<ImageJobStatusResponse> {
       const job = await getJob(jobId);
 
       if (!job || isExpired(job)) {

@@ -2,93 +2,23 @@
 
 import Image from 'next/image';
 import { useEffect, useState, type FormEvent } from 'react';
+import {
+  isImageJobCreationResponse,
+  isImageJobStatusResponse,
+  type ImageJobStatus,
+  type ImageJobStatusResponse,
+} from './lib/image-job-contract';
 
-type SubmitResponse = {
-  imageUrls: Array<{
-    size: number;
-    key: string;
-    url: string;
-  }>;
-};
+type SubmitResponse = Pick<ImageJobStatusResponse, 'imageUrls'>;
 
-type ImageUrlsResponse = Pick<SubmitResponse, 'imageUrls'>;
-
-type JobStatus =
-  | 'UPLOADING'
-  | 'GENERATING'
-  | 'RESHAPING'
-  | 'READY'
-  | 'FAILED';
-
-type JobCreateResponse = {
-  jobId: string;
-  status: 'UPLOADING';
-  uploadUrl: string;
-};
-
-type JobResponse = ImageUrlsResponse & {
-  jobId: string;
-  status: JobStatus;
-  error: string | null;
-};
-
-const STATUS_LABELS: Record<Exclude<JobStatus, 'READY' | 'FAILED'>, string> = {
+const STATUS_LABELS: Record<
+  Exclude<ImageJobStatus, 'READY' | 'FAILED'>,
+  string
+> = {
   UPLOADING: 'Uploading image…',
   GENERATING: 'Generating image…',
   RESHAPING: 'Reshaping image…',
 };
-
-function isImageUrlsResponse(value: unknown): value is ImageUrlsResponse {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-
-  const response = value as Record<string, unknown>;
-  const imageUrls = response.imageUrls;
-
-  return (
-    Array.isArray(imageUrls) &&
-    imageUrls.every(
-      (image) =>
-        typeof image === 'object' &&
-        image !== null &&
-        'size' in image &&
-        typeof image.size === 'number' &&
-        'key' in image &&
-        typeof image.key === 'string' &&
-        'url' in image &&
-        typeof image.url === 'string',
-    )
-  );
-}
-
-function isJobCreateResponse(value: unknown): value is JobCreateResponse {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'jobId' in value &&
-    typeof value.jobId === 'string' &&
-    'status' in value &&
-    value.status === 'UPLOADING' &&
-    'uploadUrl' in value &&
-    typeof value.uploadUrl === 'string'
-  );
-}
-
-function isJobResponse(value: unknown): value is JobResponse {
-  return (
-    isImageUrlsResponse(value) &&
-    'jobId' in value &&
-    typeof value.jobId === 'string' &&
-    'status' in value &&
-    typeof value.status === 'string' &&
-    ['UPLOADING', 'GENERATING', 'RESHAPING', 'READY', 'FAILED'].includes(
-      value.status,
-    ) &&
-    'error' in value &&
-    (value.error === null || typeof value.error === 'string')
-  );
-}
 
 function wait(milliseconds: number) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -103,7 +33,7 @@ async function getImageHash(image: File) {
 
 function Page() {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [status, setStatus] = useState<JobStatus | null>(null);
+  const [status, setStatus] = useState<ImageJobStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SubmitResponse | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -177,7 +107,7 @@ function Page() {
         throw new Error(message);
       }
 
-      if (!isJobCreateResponse(jobData)) {
+      if (!isImageJobCreationResponse(jobData)) {
         throw new Error('The server returned an invalid image job.');
       }
 
@@ -226,7 +156,7 @@ function Page() {
         });
         const pollData: unknown = await pollResponse.json().catch(() => null);
 
-        if (!pollResponse.ok || !isJobResponse(pollData)) {
+        if (!pollResponse.ok || !isImageJobStatusResponse(pollData)) {
           throw new Error('The image job could not be checked.');
         }
 

@@ -1,0 +1,87 @@
+export const IMAGE_JOB_STATUSES = [
+  "UPLOADING",
+  "GENERATING",
+  "RESHAPING",
+  "READY",
+  "FAILED",
+] as const;
+
+export type ImageJobStatus = (typeof IMAGE_JOB_STATUSES)[number];
+
+export type ImageUrl = {
+  key: string;
+  size: number;
+  url: string;
+};
+
+export type ImageJobCreationResponse = {
+  jobId: string;
+  status: "UPLOADING";
+  sourceKey: string;
+  uploadUrl: string;
+  expiresAt: number;
+};
+
+export type ImageJobStatusResponse = {
+  jobId: string;
+  status: ImageJobStatus;
+  sourceKey: string;
+  derivativeKeys: string[];
+  imageUrls: ImageUrl[];
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
+  expiresAt: number;
+};
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isImageUrl(value: unknown): value is ImageUrl {
+  return (
+    isObject(value) &&
+    typeof value.key === "string" &&
+    typeof value.size === "number" &&
+    typeof value.url === "string"
+  );
+}
+
+export function isImageJobCreationResponse(
+  value: unknown,
+): value is ImageJobCreationResponse {
+  return (
+    isObject(value) &&
+    typeof value.jobId === "string" &&
+    value.status === "UPLOADING" &&
+    typeof value.sourceKey === "string" &&
+    typeof value.uploadUrl === "string" &&
+    typeof value.expiresAt === "number"
+  );
+}
+
+export function isImageJobStatusResponse(
+  value: unknown,
+): value is ImageJobStatusResponse {
+  return (
+    isObject(value) &&
+    typeof value.jobId === "string" &&
+    typeof value.status === "string" &&
+    IMAGE_JOB_STATUSES.includes(value.status as ImageJobStatus) &&
+    typeof value.sourceKey === "string" &&
+    Array.isArray(value.derivativeKeys) &&
+    value.derivativeKeys.every((key) => typeof key === "string") &&
+    Array.isArray(value.imageUrls) &&
+    value.imageUrls.every(isImageUrl) &&
+    (value.error === null || typeof value.error === "string") &&
+    typeof value.createdAt === "number" &&
+    typeof value.updatedAt === "number" &&
+    typeof value.expiresAt === "number"
+  );
+}
+
+export function apiErrorMessage(value: unknown, fallback: string) {
+  return isObject(value) && typeof value.error === "string"
+    ? value.error
+    : fallback;
+}

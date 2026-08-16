@@ -8,16 +8,13 @@ import {
   PutCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
+import {
+  IMAGE_JOB_STATUSES,
+  type ImageJobStatus,
+} from "./image-job-contract";
 
-export const JOB_STATUSES = [
-  "UPLOADING",
-  "GENERATING",
-  "RESHAPING",
-  "READY",
-  "FAILED",
-] as const;
-
-export type JobStatus = (typeof JOB_STATUSES)[number];
+export const JOB_STATUSES = IMAGE_JOB_STATUSES;
+export type JobStatus = ImageJobStatus;
 
 export type ImageJob = {
   jobId: string;
