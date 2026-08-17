@@ -4,7 +4,7 @@ import {
   apiErrorMessage,
   isImageJobCreationResponse,
   isImageJobStatusResponse,
-} from "./image-job-contract.ts";
+} from "../app/lib/image-job-contract.ts";
 
 const IMAGE_HASH = "a".repeat(64);
 

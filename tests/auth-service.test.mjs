@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   resolveSubmissionAuth,
   SubmissionAuthenticationError,
-} from "./auth-service.ts";
+} from "../app/lib/auth-service.ts";
 
 const TOKEN = "1f3830d9-c035-4f29-ae1a-7b075277fc7d";
 

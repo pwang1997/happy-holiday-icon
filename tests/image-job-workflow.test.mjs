@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runImageJobWorkflow } from "./image-job-workflow.ts";
+import { runImageJobWorkflow } from "../app/lib/image-job-workflow.ts";
 
 const IMAGE_HASH = "a".repeat(64);
 

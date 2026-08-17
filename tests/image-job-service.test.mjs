@@ -4,7 +4,7 @@ import {
   createImageJobService,
   ImageJobServiceError,
   parseImageJobCreation,
-} from "./image-job-service.ts";
+} from "../app/lib/image-job-service.ts";
 
 const IMAGE_HASH = "a".repeat(64);
 const JOB = {

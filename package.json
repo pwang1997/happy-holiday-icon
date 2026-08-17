@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test app/lib/*.test.mjs"
+    "test": "tsx --test tests/*.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1107.0",

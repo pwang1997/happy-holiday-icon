@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getTrialSession } from "./trial-session.ts";
+import { getTrialSession } from "../app/lib/trial-session.ts";
 
 const TOKEN = "1f3830d9-c035-4f29-ae1a-7b075277fc7d";
 

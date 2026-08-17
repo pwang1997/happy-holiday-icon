@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { NextResponse } from "next/server";
-import { setTrialSessionCookie } from "./trial-session-cookie.ts";
+import { setTrialSessionCookie } from "../app/lib/trial-session-cookie.ts";
 
 test("leaves the response unchanged without a trial session", () => {
   const response = setTrialSessionCookie(NextResponse.json({ ok: true }), null);
