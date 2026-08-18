@@ -56,9 +56,30 @@ terraform -chdir=infra apply
 
 The HCP Terraform workspace stores the state. Set `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_S3_FINAL_BUCKET`, `DYNAMODB_JOBS_TABLE`, `DYNAMODB_USAGE_TABLE`, `COGNITO_USER_POOL_ID`, `COGNITO_WEB_CLIENT_ID`, `COGNITO_DOMAIN`, and `COGNITO_ISSUER` in the Next.js runtime from the Terraform outputs. The app uses `/api/auth/login`, `/auth/callback`, and `/api/auth/logout` for the Cognito authorization-code flow. Attach `image_jobs_policy_arn` and `anonymous_usage_policy_arn` to the Next.js runtime identity. Do not put AWS credentials in Terraform variables or commit `.env` files.
 
+## Application contract for asynchronous generation
+
+This Terraform module is the infrastructure foundation; the Next.js job flow
+must be migrated before it can use the worker. `POST /api/submit` must
+authenticate and reserve usage before it creates a DynamoDB job, then return
+`202 Accepted`, the job ID, and a constrained upload instruction. The job
+record must persist `prompt` and `style`, and the source key must be
+`uploads/<jobId>/source.<extension>`. Once the browser uploads that source,
+the worker claims `UPLOADING -> GENERATING`, writes
+`images/<jobId>/generated.png`, and hands it to the reshape Lambda. The polling
+endpoint must authorize the job owner before returning status or signed URLs.
+
+The current blocking submit route and hash-scoped source keys do not satisfy
+this contract. The worker intentionally skips those legacy source keys rather
+than generating an image without a job-scoped authorization record.
+
 ## Image reshaping Lambda
 
-The `image-reshaper` Lambda reads new objects from the temporary bucket and writes WebP derivatives to the final bucket under `images/<source-name>/<size>.webp`. It creates 32px, 48px, and 512px square outputs when both source dimensions are at least the requested size; smaller sizes are skipped. The function uses Sharp and runs on the Lambda ARM64 architecture.
+The `image-reshaper` Lambda reads generated objects from the temporary bucket
+and writes WebP derivatives to the final bucket under
+`images/<jobId>-holiday-icon/<size>.webp`. It creates 32px, 48px, and 512px
+square outputs when both source dimensions are at least the requested size;
+smaller sizes are skipped. The function uses Sharp and runs on the Lambda ARM64
+architecture.
 
 Rebuild the deployment packages after changing either Lambda source or dependencies:
 
