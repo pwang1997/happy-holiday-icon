@@ -78,6 +78,21 @@ output "image_generation_dlq_arn" {
   value       = aws_sqs_queue.image_generation_dlq.arn
 }
 
+output "image_generator_function_name" {
+  description = "Name of the Lambda function that generates an intermediate holiday icon."
+  value       = aws_lambda_function.image_generator.function_name
+}
+
+output "image_generator_function_arn" {
+  description = "ARN of the Lambda function that generates an intermediate holiday icon."
+  value       = aws_lambda_function.image_generator.arn
+}
+
+output "image_generation_openai_secret_arn" {
+  description = "Secrets Manager ARN where the image-generation worker reads OPENAI_API_KEY."
+  value       = aws_secretsmanager_secret.openai_api_key.arn
+}
+
 output "cognito_user_pool_id" {
   description = "ID of the Cognito user pool used for registered users."
   value       = aws_cognito_user_pool.users.id

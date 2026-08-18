@@ -33,11 +33,8 @@ async function bodyToBuffer(body) {
   return Buffer.concat(chunks);
 }
 
-function outputKey(sourceKey, size) {
-  const fileName = sourceKey.split("/").pop() || "image";
-  const baseName = fileName.replace(/\.[^/.]+$/, "") || "image";
-
-  return `images/${baseName}/${size}.webp`;
+function outputKey(jobId, size) {
+  return `images/${jobId}-holiday-icon/${size}.webp`;
 }
 
 function jobIdFromSourceKey(sourceKey) {
@@ -49,7 +46,11 @@ function jobIdFromSourceKey(sourceKey) {
   return match?.[1] ?? null;
 }
 
-async function updateJob(jobId, { status, derivativeKeys, error }) {
+function isConditionalCheckFailed(error) {
+  return error instanceof Error && error.name === "ConditionalCheckFailedException";
+}
+
+async function updateJob(jobId, { status, derivativeKeys, error }, expectedStatus) {
   const tableName = process.env.DYNAMODB_JOBS_TABLE;
 
   if (!jobId || !tableName) {
@@ -57,10 +58,12 @@ async function updateJob(jobId, { status, derivativeKeys, error }) {
   }
 
   const expressionAttributeNames = {
+    "#expectedStatus": "status",
     "#status": "status",
     "#updatedAt": "updated_at",
   };
   const expressionAttributeValues = {
+    ":expectedStatus": { S: expectedStatus },
     ":status": { S: status },
     ":updatedAt": { N: String(Math.floor(Date.now() / 1000)) },
   };
@@ -74,9 +77,10 @@ async function updateJob(jobId, { status, derivativeKeys, error }) {
     assignments.push("#derivativeKeys = :derivativeKeys");
   }
 
-  if (error) {
+  if (error !== undefined) {
     expressionAttributeNames["#error"] = "error";
-    expressionAttributeValues[":error"] = { S: error.slice(0, 500) };
+    expressionAttributeValues[":error"] =
+      error === null ? { NULL: true } : { S: error.slice(0, 500) };
     assignments.push("#error = :error");
   }
 
@@ -84,12 +88,32 @@ async function updateJob(jobId, { status, derivativeKeys, error }) {
     new UpdateItemCommand({
       TableName: tableName,
       Key: { job_id: { S: jobId } },
-      ConditionExpression: "attribute_exists(job_id)",
+      ConditionExpression: "attribute_exists(job_id) AND #expectedStatus = :expectedStatus",
       UpdateExpression: `SET ${assignments.join(", ")}`,
       ExpressionAttributeNames: expressionAttributeNames,
       ExpressionAttributeValues: expressionAttributeValues,
     }),
   );
+}
+
+async function markJobFailed(jobId, error) {
+  try {
+    await updateJob(
+      jobId,
+      {
+        status: "FAILED",
+        error: error instanceof Error ? error.message : "Image reshaping failed",
+      },
+      "RESHAPING",
+    );
+    return true;
+  } catch (updateError) {
+    if (isConditionalCheckFailed(updateError)) {
+      return false;
+    }
+
+    throw updateError;
+  }
 }
 
 async function jobIdForRecord(record) {
@@ -141,6 +165,11 @@ async function processRecord(record, destinationBucket) {
   );
   const input = await bodyToBuffer(object.Body);
   const jobId = object.Metadata?.jobid ?? jobIdFromSourceKey(sourceKey);
+
+  if (!jobId) {
+    throw new Error("Generated image does not identify an image job");
+  }
+
   const metadata = await sharp(input).rotate().metadata();
   const width = metadata.width ?? 0;
   const height = metadata.height ?? 0;
@@ -162,7 +191,19 @@ async function processRecord(record, destinationBucket) {
       width,
       height,
     };
-    await updateJob(jobId, { status: "READY", derivativeKeys: [] });
+    try {
+      await updateJob(
+        jobId,
+        { status: "READY", derivativeKeys: [], error: null },
+        "RESHAPING",
+      );
+    } catch (error) {
+      if (isConditionalCheckFailed(error)) {
+        return { ...result, reason: "job-not-reshaping" };
+      }
+
+      throw error;
+    }
     return result;
   }
 
@@ -177,7 +218,7 @@ async function processRecord(record, destinationBucket) {
         })
         .webp({ quality: 82 })
         .toBuffer();
-      const key = outputKey(sourceKey, size);
+      const key = outputKey(jobId, size);
 
       await s3.send(
         new PutObjectCommand({
@@ -201,7 +242,19 @@ async function processRecord(record, destinationBucket) {
   });
 
   const derivativeKeys = outputs.map((output) => output.key);
-  await updateJob(jobId, { status: "READY", derivativeKeys });
+  try {
+    await updateJob(
+      jobId,
+      { status: "READY", derivativeKeys, error: null },
+      "RESHAPING",
+    );
+  } catch (error) {
+    if (isConditionalCheckFailed(error)) {
+      return { key: sourceKey, jobId, skipped: true, reason: "job-not-reshaping" };
+    }
+
+    throw error;
+  }
 
   return { key: sourceKey, jobId, outputs };
 }
@@ -224,10 +277,17 @@ export async function handler(event) {
       const jobId = await jobIdForRecord(record);
 
       try {
-        await updateJob(jobId, {
-          status: "FAILED",
-          error: error instanceof Error ? error.message : "Image reshaping failed",
-        });
+        const failed = await markJobFailed(jobId, error);
+
+        if (!failed) {
+          results.push({
+            key: record.s3?.object?.key,
+            jobId,
+            skipped: true,
+            reason: "job-not-reshaping",
+          });
+          continue;
+        }
       } catch (jobError) {
         console.error("Unable to mark image job as failed", jobError);
       }

@@ -1,0 +1,10 @@
+{
+  "name": "happy-holiday-icon-image-generator",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1107.0",
+    "@aws-sdk/client-s3": "3.1106.0",
+    "@aws-sdk/client-secrets-manager": "3.1107.0"
+  }
+}

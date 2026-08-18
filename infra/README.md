@@ -21,6 +21,26 @@ the queue. The queue policy accepts messages only from this bucket and AWS
 account. Generated objects under `images/` continue to invoke the reshaping
 Lambda directly; source uploads never invoke Sharp resizing.
 
+The queue invokes the `image-generator` Lambda one message at a time. It reads
+the source object and job instructions, calls the OpenAI image-edit API, and
+writes the generated PNG under `images/<jobId>/generated.png`. The existing
+reshape Lambda receives that generated object. The worker is limited by
+`image_generation_reserved_concurrency`, uses an SQS dead-letter queue after
+five unhandled delivery failures, and creates CloudWatch alarms for worker
+errors, dead-letter messages, and source-message age. Configure
+`image_generation_alarm_actions` with notification targets such as an SNS topic
+before production use.
+
+Terraform creates an empty Secrets Manager secret for the worker. After the
+first apply, set either a raw API key or a JSON value containing
+`OPENAI_API_KEY`; never put it in Terraform variables or state:
+
+```sh
+aws secretsmanager put-secret-value \
+  --secret-id "$(terraform -chdir=infra output -raw image_generation_openai_secret_arn)" \
+  --secret-string '{"OPENAI_API_KEY":"replace-me"}'
+```
+
 Both buckets use public-access blocking, ownership enforcement, versioning, AES-256 encryption, CORS, lifecycle cleanup for incomplete uploads, and TLS-only bucket policies.
 
 ## Initialize and apply
@@ -40,10 +60,13 @@ The HCP Terraform workspace stores the state. Set `AWS_REGION`, `AWS_S3_BUCKET`,
 
 The `image-reshaper` Lambda reads new objects from the temporary bucket and writes WebP derivatives to the final bucket under `images/<source-name>/<size>.webp`. It creates 32px, 48px, and 512px square outputs when both source dimensions are at least the requested size; smaller sizes are skipped. The function uses Sharp and runs on the Lambda ARM64 architecture.
 
-Rebuild the deployment package after changing the Lambda source or dependencies:
+Rebuild the deployment packages after changing either Lambda source or dependencies:
 
 ```sh
 ./infra/lambda/build.sh
 ```
 
-The generated `infra/lambda/image-reshaper.zip` is the artifact Terraform uploads. Run the build before `terraform plan` so the package exists and its hash reflects the current source.
+The generated `infra/lambda/image-reshaper.zip` and
+`infra/lambda/image-generator.zip` artifacts are what Terraform uploads. Run
+the build before `terraform plan` so the packages exist and their hashes reflect
+the current source.

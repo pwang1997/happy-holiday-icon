@@ -22,8 +22,15 @@ resource "aws_sqs_queue" "image_generation" {
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.image_generation_dlq.arn
-    maxReceiveCount     = 3
+    maxReceiveCount     = 5
   })
+
+  lifecycle {
+    precondition {
+      condition     = var.image_generation_visibility_timeout_seconds >= 6 * var.image_generation_timeout_seconds
+      error_message = "image_generation_visibility_timeout_seconds must be at least six times image_generation_timeout_seconds for the Lambda event source mapping."
+    }
+  }
 
   tags = {
     ServiceRole = "image-generation-source-events"
