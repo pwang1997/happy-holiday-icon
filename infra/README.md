@@ -15,6 +15,12 @@ no client secret; the application must use PKCE during sign-in. Configure
 `cognito_callback_urls` and `cognito_logout_urls` with the exact deployed
 application URLs before applying.
 
+It also provisions an encrypted SQS source-image queue and dead-letter queue.
+Object-created events under `uploads/` in the temporary bucket are delivered to
+the queue. The queue policy accepts messages only from this bucket and AWS
+account. Generated objects under `images/` continue to invoke the reshaping
+Lambda directly; source uploads never invoke Sharp resizing.
+
 Both buckets use public-access blocking, ownership enforcement, versioning, AES-256 encryption, CORS, lifecycle cleanup for incomplete uploads, and TLS-only bucket policies.
 
 ## Initialize and apply

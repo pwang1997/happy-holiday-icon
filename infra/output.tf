@@ -63,6 +63,21 @@ output "image_reshaper_function_arn" {
   value       = aws_lambda_function.image_reshaper.arn
 }
 
+output "image_generation_queue_url" {
+  description = "URL of the SQS queue receiving temporary source-image upload events."
+  value       = aws_sqs_queue.image_generation.url
+}
+
+output "image_generation_queue_arn" {
+  description = "ARN of the SQS queue receiving temporary source-image upload events."
+  value       = aws_sqs_queue.image_generation.arn
+}
+
+output "image_generation_dlq_arn" {
+  description = "ARN of the dead-letter queue for failed source-image generation events."
+  value       = aws_sqs_queue.image_generation_dlq.arn
+}
+
 output "cognito_user_pool_id" {
   description = "ID of the Cognito user pool used for registered users."
   value       = aws_cognito_user_pool.users.id

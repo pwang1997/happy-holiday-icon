@@ -54,6 +54,17 @@ variable "temporary_object_retention_days" {
   }
 }
 
+variable "image_generation_visibility_timeout_seconds" {
+  type        = number
+  description = "SQS visibility timeout for a source-image generation job. Keep this greater than the generation Lambda timeout."
+  default     = 960
+
+  validation {
+    condition     = var.image_generation_visibility_timeout_seconds >= 60 && var.image_generation_visibility_timeout_seconds <= 43200
+    error_message = "image_generation_visibility_timeout_seconds must be between 60 seconds and 12 hours."
+  }
+}
+
 variable "cognito_callback_urls" {
   type        = list(string)
   description = "OAuth callback URLs allowed by the Cognito web client."
