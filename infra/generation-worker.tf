@@ -97,9 +97,8 @@ resource "aws_lambda_function" "image_generator" {
 
   source_code_hash = filebase64sha256(local.image_generator_package_path)
 
-  memory_size                    = 1024
-  timeout                        = var.image_generation_timeout_seconds
-  reserved_concurrent_executions = var.image_generation_reserved_concurrency
+  memory_size = 1024
+  timeout     = var.image_generation_timeout_seconds
 
   environment {
     variables = {
