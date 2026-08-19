@@ -1,59 +1,21 @@
 openapi: 3.1.0
 info:
   title: Happy Holiday Icon API
-  version: 1.0.0
+  version: 1.1.0
   description: |
-    Creates holiday icons from uploaded images. The browser uploads source files
-    directly to S3 with a presigned URL, then submits the image job for
-    generation. Image reshaping is asynchronous; clients poll the job endpoint
-    until signed WebP download URLs are available.
+    Creates holiday icons from uploaded images. `POST /api/submit` admits a job
+    and returns a bounded presigned S3 POST form. The browser uploads the source
+    file directly to S3, then polls the job endpoint while generation and image
+    reshaping run asynchronously.
 servers:
   - url: http://localhost:3000
     description: Local development
 tags:
   - name: Jobs
-    description: Image job creation, submission, and polling.
+    description: Image job admission and polling.
   - name: Authentication
     description: Cognito managed-login session endpoints.
 paths:
-  /api/jobs:
-    post:
-      tags: [Jobs]
-      operationId: createImageJob
-      summary: Create an image job and a presigned source upload URL
-      description: |
-        Creates an `UPLOADING` job record and returns a 60-second presigned S3
-        PUT URL. Upload the source bytes to `uploadUrl` with the same
-        `Content-Type` supplied in this request before calling `/api/submit`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateImageJobRequest'
-      responses:
-        '201':
-          description: Image job created.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CreatedImageJob'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '415':
-          description: The supplied image content type is not supported.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: Only PNG, JPG, and WEBP images are supported.
-        '503':
-          description: S3 or DynamoDB is unavailable or not configured.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
   /api/jobs/{jobId}:
     get:
       tags: [Jobs]
@@ -63,7 +25,12 @@ paths:
         Returns an image job's current state. When the job is `READY`,
         `imageUrls` contains signed final-bucket download URLs for derivatives
         that were created. Job expiry is checked by the application even though
-        DynamoDB TTL deletion is asynchronous.
+        DynamoDB TTL deletion is asynchronous. The caller must own the job;
+        jobs belonging to another identity return `404`.
+      security:
+        - bearerAuth: []
+        - cognitoAccessToken: []
+        - {}
       parameters:
         - $ref: '#/components/parameters/JobId'
       responses:
@@ -74,7 +41,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImageJob'
         '404':
-          description: The job does not exist or has expired.
+          description: The job does not exist, has expired, or belongs to another identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: The supplied Cognito access token is invalid or expired.
           content:
             application/json:
               schema:
@@ -89,13 +62,14 @@ paths:
     post:
       tags: [Jobs]
       operationId: submitImageJob
-      summary: Generate an icon from an uploaded image job
+      summary: Admit an image job and create a bounded source upload form
       description: |
-        Reads the previously uploaded source image, records usage, and asks
-        OpenAI to generate an icon. The response is returned after the generated
-        PNG reaches the temporary bucket and before the S3-triggered Lambda has
-        finished creating WebP derivatives. Poll `GET /api/jobs/{jobId}` for
-        final signed URLs.
+        Authenticates the caller, reserves usage, creates an `UPLOADING` job,
+        and returns before the source upload or image generation begins. Submit
+        the returned `upload.fields` and original source file as a multipart
+        form POST to `upload.url`; S3 enforces the form's content type and byte
+        limit. Then poll `GET /api/jobs/{jobId}` for status and final signed
+        URLs.
 
         A valid Cognito access token can be sent as a bearer token or the
         `cognito_access_token` HTTP-only cookie. Requests without a Cognito
@@ -108,15 +82,15 @@ paths:
       requestBody:
         required: true
         content:
-          multipart/form-data:
+          application/json:
             schema:
               type: object
-              required: [jobId, prompt, style]
+              required: [contentType, prompt, style]
               properties:
-                jobId:
+                contentType:
                   type: string
-                  format: uuid
-                  description: The `jobId` returned by `POST /api/jobs`.
+                  enum: [image/png, image/jpeg, image/webp]
+                  description: MIME type of the source file submitted to S3.
                 prompt:
                   type: string
                   minLength: 1
@@ -127,8 +101,8 @@ paths:
       responses:
         '202':
           description: |
-            Generation completed and derivative processing has begun. The final
-            job state will be `READY` or `FAILED`.
+            The job is admitted and awaits the source file. The final job state
+            will be `READY` or `FAILED` after asynchronous processing.
           headers:
             Set-Cookie:
               description: Sent for anonymous requests to create or refresh the HTTP-only trial session.
@@ -137,7 +111,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SubmitAccepted'
+                $ref: '#/components/schemas/SubmittedImageJob'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -157,31 +131,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: The image job does not exist or has expired.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '409':
-          description: The image job is no longer in the `UPLOADING` state.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '502':
-          description: Image generation failed after the generation attempt started.
-          headers:
-            Set-Cookie:
-              description: Sent for anonymous requests to preserve the trial session.
-              schema:
-                type: string
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
         '503':
-          description: A required OpenAI, Cognito, DynamoDB, or S3 dependency is unavailable or not configured.
+          description: A required Cognito, DynamoDB, or S3 dependency is unavailable or not configured.
           headers:
             Set-Cookie:
               description: May be sent for anonymous requests after a trial session is created.
@@ -333,7 +284,7 @@ components:
       name: jobId
       in: path
       required: true
-      description: UUID assigned when the image job is created.
+      description: UUID assigned when `POST /api/submit` admits the image job.
       schema:
         type: string
         format: uuid
@@ -345,24 +296,9 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
-    CreateImageJobRequest:
+    SubmittedImageJob:
       type: object
-      required: [contentType, imageHash]
-      properties:
-        contentType:
-          type: string
-          enum: [image/png, image/jpeg, image/webp]
-          description: MIME type that will be used for the presigned S3 PUT request.
-        imageHash:
-          type: string
-          pattern: '^[a-f0-9]{64}$'
-          description: Lowercase SHA-256 hash of the original image binary.
-      example:
-        contentType: image/png
-        imageHash: 0d4f1ccad3e65f934b34a24731d1f4ac3d03b7eec1f8e8b2a9a21c17af6d0b46
-    CreatedImageJob:
-      type: object
-      required: [jobId, status, sourceKey, uploadUrl, expiresAt]
+      required: [jobId, status, sourceKey, upload, expiresAt]
       properties:
         jobId:
           type: string
@@ -373,32 +309,29 @@ components:
         sourceKey:
           type: string
           description: Private temporary-bucket object key for the source upload.
-          example: uploads/0d4f1ccad3e65f934b34a24731d1f4ac3d03b7eec1f8e8b2a9a21c17af6d0b46/source.png
-        uploadUrl:
-          type: string
-          format: uri
-          description: Presigned temporary-bucket PUT URL, valid for 60 seconds.
+          example: uploads/a9f4a6d7-ecf5-448d-a7ce-51954d3a234d/source.png
+        upload:
+          type: object
+          required: [url, fields, maxBytes]
+          description: Presigned temporary-bucket POST details, valid for 60 seconds.
+          properties:
+            url:
+              type: string
+              format: uri
+              description: S3 form action URL.
+            fields:
+              type: object
+              additionalProperties:
+                type: string
+              description: Fields that must be included unchanged in the S3 multipart form POST.
+            maxBytes:
+              type: integer
+              minimum: 1
+              description: Maximum permitted source-file byte size, enforced by S3.
         expiresAt:
           type: integer
           format: int64
           description: Unix epoch seconds when the job expires.
-    SubmitAccepted:
-      type: object
-      required: [jobId, status, imageKey, revisedPrompt]
-      properties:
-        jobId:
-          type: string
-          format: uuid
-        status:
-          type: string
-          const: RESHAPING
-        imageKey:
-          type: string
-          description: Generated PNG object key in the temporary bucket.
-          example: images/0d4f1ccad3e65f934b34a24731d1f4ac3d03b7eec1f8e8b2a9a21c17af6d0b46-holiday-icon.png
-        revisedPrompt:
-          type: [string, 'null']
-          description: Revised prompt returned by the image-generation provider, when available.
     ImageJob:
       type: object
       required:

@@ -56,10 +56,22 @@ export async function runImageJobWorkflow(
     throw new Error("The server returned an invalid image job.");
   }
 
-  const uploadResponse = await fetchImpl(jobData.uploadUrl, {
-    method: "PUT",
-    headers: { "Content-Type": image.type },
-    body: image,
+  if (image.size > jobData.upload.maxBytes) {
+    throw new Error(
+      `The source image must be ${Math.floor(jobData.upload.maxBytes / (1024 * 1024))} MB or smaller.`,
+    );
+  }
+
+  const uploadFormData = new FormData();
+
+  for (const [name, value] of Object.entries(jobData.upload.fields)) {
+    uploadFormData.append(name, value);
+  }
+
+  uploadFormData.append("file", image);
+  const uploadResponse = await fetchImpl(jobData.upload.url, {
+    method: "POST",
+    body: uploadFormData,
   });
 
   if (!uploadResponse.ok) {

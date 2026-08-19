@@ -10,7 +10,7 @@ import type {
 } from "./image-job-contract";
 import {
   getImageDownloadUrlIfExists,
-  getTemporaryImageUploadUrl,
+  getTemporaryImageUploadPost,
 } from "./s3";
 import { STYLE_INSTRUCTIONS, type Style } from "./instructions";
 
@@ -21,7 +21,7 @@ type ImageJobServiceDependencies = {
   createImageJob: typeof createImageJob;
   getImageDownloadUrlIfExists: typeof getImageDownloadUrlIfExists;
   getImageJob: typeof getImageJob;
-  getTemporaryImageUploadUrl: typeof getTemporaryImageUploadUrl;
+  getTemporaryImageUploadPost: typeof getTemporaryImageUploadPost;
 };
 
 export class ImageJobServiceError extends Error {
@@ -100,20 +100,20 @@ export function createImageJobService({
   createImageJob: createJob,
   getImageDownloadUrlIfExists: getDownloadUrl,
   getImageJob: getJob,
-  getTemporaryImageUploadUrl: getUploadUrl,
+  getTemporaryImageUploadPost: createUploadPost,
 }: ImageJobServiceDependencies) {
   return {
     async createImageUploadJob(
       input: ImageJobCreationInput,
     ): Promise<ImageJobCreationResponse> {
       const job = await createJob(input);
-      const uploadUrl = await getUploadUrl(job.sourceKey, input.contentType);
+      const upload = await createUploadPost(job.sourceKey, input.contentType);
 
       return {
         jobId: job.jobId,
         status: "UPLOADING",
         sourceKey: job.sourceKey,
-        uploadUrl,
+        upload,
         expiresAt: job.expiresAt,
       };
     },
@@ -176,5 +176,5 @@ export const imageJobService = createImageJobService({
   createImageJob,
   getImageDownloadUrlIfExists,
   getImageJob,
-  getTemporaryImageUploadUrl,
+  getTemporaryImageUploadPost,
 });

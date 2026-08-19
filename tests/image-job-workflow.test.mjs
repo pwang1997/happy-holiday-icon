@@ -39,19 +39,27 @@ function submissionFormData() {
 test("admits a job, uploads its source, and polls without waiting for generation", async () => {
   const statuses = [];
   const requests = [];
+  const formData = submissionFormData();
   const responses = [
     response({
       jobId: "job-123",
       status: "UPLOADING",
       sourceKey: `uploads/${JOB_ID}/source.png`,
-      uploadUrl: "https://upload.example.test/source.png",
+      upload: {
+        url: "https://upload.example.test/source.png",
+        fields: {
+          "Content-Type": "image/png",
+          key: `uploads/${JOB_ID}/source.png`,
+        },
+        maxBytes: 10 * 1024 * 1024,
+      },
       expiresAt: 4_102_444_800,
     }, 202),
     new Response(null, { status: 200 }),
     response(readyJobResponse()),
   ];
 
-  const imageUrls = await runImageJobWorkflow(submissionFormData(), {
+  const imageUrls = await runImageJobWorkflow(formData, {
     fetchImpl: async (input, init) => {
       requests.push({ input: String(input), init });
       const next = responses.shift();
@@ -72,6 +80,12 @@ test("admits a job, uploads its source, and polls without waiting for generation
       "/api/jobs/job-123",
     ],
   );
+  const uploadRequest = requests[1];
+  assert.equal(uploadRequest.init?.method, "POST");
+  assert.ok(uploadRequest.init?.body instanceof FormData);
+  assert.equal(uploadRequest.init.body.get("key"), `uploads/${JOB_ID}/source.png`);
+  assert.equal(uploadRequest.init.body.get("Content-Type"), "image/png");
+  assert.equal(uploadRequest.init.body.get("file"), formData.get("image"));
 });
 
 test("surfaces an API error when job admission fails", async () => {

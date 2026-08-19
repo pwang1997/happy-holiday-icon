@@ -25,7 +25,10 @@ flowchart LR
     FinalS3[Final S3 bucket]
     Jobs[(DynamoDB image jobs)]
     Usage[(DynamoDB usage)]
-    Lambda[Image reshaper Lambda and Sharp]
+  Queue[SQS image-generation queue]
+  Generator[Image-generator Lambda]
+  Reshaper[Image-reshaper Lambda and Sharp]
+  Secrets[Secrets Manager]
     Cognito[Amazon Cognito]
   end
 
@@ -33,27 +36,31 @@ flowchart LR
   HCP -. provisions .-> FinalS3
   HCP -. provisions .-> Jobs
   HCP -. provisions .-> Usage
-  HCP -. provisions .-> Lambda
+  HCP -. provisions .-> Queue
+  HCP -. provisions .-> Generator
+  HCP -. provisions .-> Reshaper
+  HCP -. provisions .-> Secrets
   HCP -. provisions .-> Cognito
-
-  Browser -->|POST /api/jobs| Next
-  Next -->|create UPLOADING job| Jobs
-  Next -->|presigned PUT URL| Browser
-  Browser -->|PUT uploads source image| TemporaryS3
 
   Browser -->|POST /api/submit| Next
   Next <-->|PKCE sign-in and access token| Cognito
-  Next -->|record usage| Usage
-  Next -->|read uploaded source| TemporaryS3
-  Next -->|image edit request| OpenAI
-  OpenAI -->|generated PNG| Next
-  Next -->|PUT images generated icon| TemporaryS3
-  Next -->|GENERATING then RESHAPING| Jobs
+  Next -->|reserve usage| Usage
+  Next -->|create UPLOADING job| Jobs
+  Next -->|bounded presigned POST form| Browser
+  Browser -->|POST source image| TemporaryS3
 
-  TemporaryS3 -->|ObjectCreated under images| Lambda
-  Lambda -->|read generated PNG| TemporaryS3
-  Lambda -->|write 32, 48, 512 WebP| FinalS3
-  Lambda -->|READY or FAILED and derivative keys| Jobs
+  TemporaryS3 -->|ObjectCreated under uploads| Queue
+  Queue -->|source event| Generator
+  Generator -->|read exact object version| TemporaryS3
+  Generator -->|read API key| Secrets
+  Generator -->|image edit request| OpenAI
+  OpenAI -->|generated PNG| Generator
+  Generator -->|write generated PNG; RESHAPING| TemporaryS3
+
+  TemporaryS3 -->|ObjectCreated under images| Reshaper
+  Reshaper -->|read generated PNG| TemporaryS3
+  Reshaper -->|write 32, 48, 512 WebP| FinalS3
+  Reshaper -->|READY or FAILED and derivative keys| Jobs
 
   Browser -->|poll GET /api/jobs jobId| Next
   Next -->|read job and sign final URLs| Jobs
@@ -63,7 +70,7 @@ flowchart LR
 
 ## API contract
 
-[`openapi.yaml`](openapi.yaml) documents the seven App Router endpoints for **job creation**, **submission**, **polling**, and **Cognito auth**. It includes request schemas, response states, error cases, optional bearer or cookie authentication, and the presigned S3 upload handoff.
+[`openapi.yaml`](openapi.yaml) documents the six App Router endpoints for **job admission**, **polling**, and **Cognito auth**. It includes request schemas, response states, error cases, optional bearer or cookie authentication, and the bounded presigned S3 POST upload handoff.
 
 ## Provision infrastructure
 

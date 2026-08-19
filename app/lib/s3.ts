@@ -5,8 +5,11 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
+const DEFAULT_MAX_SOURCE_IMAGE_BYTES = 10 * 1024 * 1024;
+const SOURCE_UPLOAD_EXPIRATION_SECONDS = 60;
 let client: S3Client | undefined;
 
 export function getS3Client() {
@@ -38,20 +41,51 @@ export function getTemporaryImageBucket() {
   return getS3Bucket("AWS_S3_BUCKET");
 }
 
-export async function getTemporaryImageUploadUrl(
+export type ImageUploadPost = {
+  url: string;
+  fields: Record<string, string>;
+  maxBytes: number;
+};
+
+export function getMaxSourceImageBytes() {
+  const configuredValue = process.env.IMAGE_MAX_UPLOAD_BYTES?.trim();
+
+  if (!configuredValue) {
+    return DEFAULT_MAX_SOURCE_IMAGE_BYTES;
+  }
+
+  const maxBytes = Number(configuredValue);
+
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    throw new Error("IMAGE_MAX_UPLOAD_BYTES must be a positive integer");
+  }
+
+  return maxBytes;
+}
+
+export async function getTemporaryImageUploadPost(
   key: string,
   contentType: string,
-  expiresIn = 60,
-) {
-  return getSignedUrl(
+  expiresIn = SOURCE_UPLOAD_EXPIRATION_SECONDS,
+): Promise<ImageUploadPost> {
+  const maxBytes = getMaxSourceImageBytes();
+  const upload = await createPresignedPost(
     getS3Client(),
-    new PutObjectCommand({
+    {
       Bucket: getTemporaryImageBucket(),
       Key: key,
-      ContentType: contentType,
-    }),
-    { expiresIn },
+      Conditions: [
+        ["content-length-range", 1, maxBytes],
+        { "Content-Type": contentType },
+      ],
+      Fields: {
+        "Content-Type": contentType,
+      },
+      Expires: expiresIn,
+    },
   );
+
+  return { ...upload, maxBytes };
 }
 
 export async function uploadImage({

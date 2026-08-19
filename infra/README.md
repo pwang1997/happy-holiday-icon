@@ -54,23 +54,21 @@ terraform -chdir=infra plan
 terraform -chdir=infra apply
 ```
 
-The HCP Terraform workspace stores the state. Set `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_S3_FINAL_BUCKET`, `DYNAMODB_JOBS_TABLE`, `DYNAMODB_USAGE_TABLE`, `COGNITO_USER_POOL_ID`, `COGNITO_WEB_CLIENT_ID`, `COGNITO_DOMAIN`, and `COGNITO_ISSUER` in the Next.js runtime from the Terraform outputs. The app uses `/api/auth/login`, `/auth/callback`, and `/api/auth/logout` for the Cognito authorization-code flow. Attach `image_jobs_policy_arn` and `anonymous_usage_policy_arn` to the Next.js runtime identity. Do not put AWS credentials in Terraform variables or commit `.env` files.
+The HCP Terraform workspace stores the state. Set `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_S3_FINAL_BUCKET`, `IMAGE_MAX_UPLOAD_BYTES`, `DYNAMODB_JOBS_TABLE`, `DYNAMODB_USAGE_TABLE`, `COGNITO_USER_POOL_ID`, `COGNITO_WEB_CLIENT_ID`, `COGNITO_DOMAIN`, and `COGNITO_ISSUER` in the Next.js runtime from the Terraform outputs. The app uses `/api/auth/login`, `/auth/callback`, and `/api/auth/logout` for the Cognito authorization-code flow. Attach `image_jobs_policy_arn` and `anonymous_usage_policy_arn` to the Next.js runtime identity. Do not put AWS credentials in Terraform variables or commit `.env` files.
 
 ## Application contract for asynchronous generation
 
-This Terraform module is the infrastructure foundation; the Next.js job flow
-must be migrated before it can use the worker. `POST /api/submit` must
-authenticate and reserve usage before it creates a DynamoDB job, then return
-`202 Accepted`, the job ID, and a constrained upload instruction. The job
+`POST /api/submit` authenticates and reserves usage before it creates a
+DynamoDB job, then returns `202 Accepted`, the job ID, and a constrained
+presigned POST upload instruction.
+S3 rejects source uploads outside `max_source_image_bytes` (10 MiB by default),
+and the generator independently verifies size, format, dimensions, and the
+event's exact object version before it reads the object body. The job
 record must persist `prompt` and `style`, and the source key must be
 `uploads/<jobId>/source.<extension>`. Once the browser uploads that source,
 the worker claims `UPLOADING -> GENERATING`, writes
 `images/<jobId>/generated.png`, and hands it to the reshape Lambda. The polling
-endpoint must authorize the job owner before returning status or signed URLs.
-
-The current blocking submit route and hash-scoped source keys do not satisfy
-this contract. The worker intentionally skips those legacy source keys rather
-than generating an image without a job-scoped authorization record.
+endpoint authorizes the job owner before returning status or signed URLs.
 
 ## Image reshaping Lambda
 

@@ -14,7 +14,11 @@ test("validates the image-job creation response contract", () => {
       jobId: "job-123",
       status: "UPLOADING",
       sourceKey: `uploads/${JOB_ID}/source.png`,
-      uploadUrl: "https://upload.example.test",
+      upload: {
+        url: "https://upload.example.test",
+        fields: { key: `uploads/${JOB_ID}/source.png` },
+        maxBytes: 10 * 1024 * 1024,
+      },
       expiresAt: 4_102_444_800,
     }),
     true,

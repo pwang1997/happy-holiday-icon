@@ -1,6 +1,7 @@
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
 import {
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -8,6 +9,7 @@ import {
   GetSecretValueCommand,
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager";
+import sharp from "sharp";
 
 const dynamodb = new DynamoDBClient({});
 const s3 = new S3Client({});
@@ -32,6 +34,16 @@ function requiredEnvironment(name) {
 
   if (!value) {
     throw new Error(`${name} is required`);
+  }
+
+  return value;
+}
+
+function requiredPositiveIntegerEnvironment(name) {
+  const value = Number(requiredEnvironment(name));
+
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer`);
   }
 
   return value;
@@ -69,6 +81,20 @@ function sourceContentType(extension) {
   }
 }
 
+function sourceFormat(extension) {
+  switch (extension) {
+    case "png":
+      return "png";
+    case "jpg":
+    case "jpeg":
+      return "jpeg";
+    case "webp":
+      return "webp";
+    default:
+      throw new Error(`Unsupported source extension: ${extension}`);
+  }
+}
+
 function styleInstruction(style) {
   const instruction = STYLE_INSTRUCTIONS[style];
 
@@ -88,22 +114,111 @@ function isConditionalCheckFailed(error) {
   return error instanceof Error && error.name === "ConditionalCheckFailedException";
 }
 
-async function bodyToBuffer(body) {
+async function bodyToBuffer(body, maxBytes) {
   if (!body) {
     throw new Error("S3 returned an empty source image");
   }
 
-  if (typeof body.transformToByteArray === "function") {
-    return Buffer.from(await body.transformToByteArray());
-  }
-
   const chunks = [];
+  let byteLength = 0;
 
   for await (const chunk of body) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    byteLength += bytes.length;
+
+    if (byteLength > maxBytes) {
+      throw new Error(`Source image exceeds the ${maxBytes}-byte limit`);
+    }
+
+    chunks.push(bytes);
   }
 
-  return Buffer.concat(chunks);
+  if (byteLength === 0) {
+    throw new Error("S3 returned an empty source image");
+  }
+
+  return Buffer.concat(chunks, byteLength);
+}
+
+async function getValidatedSourceImage({
+  bucket,
+  extension,
+  key,
+  maxBytes,
+  maxDimension,
+  maxPixels,
+  versionId,
+}) {
+  const expectedContentType = sourceContentType(extension);
+  const expectedFormat = sourceFormat(extension);
+  const head = await s3.send(
+    new HeadObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      VersionId: versionId,
+    }),
+  );
+  const contentLength = head.ContentLength;
+
+  if (!Number.isSafeInteger(contentLength) || contentLength <= 0) {
+    throw new Error("Source image has an invalid content length");
+  }
+
+  if (contentLength > maxBytes) {
+    throw new Error(`Source image exceeds the ${maxBytes}-byte limit`);
+  }
+
+  if (head.ContentType !== expectedContentType) {
+    throw new Error(`Source image content type must be ${expectedContentType}`);
+  }
+
+  const source = await s3.send(
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      VersionId: versionId,
+    }),
+  );
+  const input = await bodyToBuffer(source.Body, maxBytes);
+
+  if (input.length !== contentLength) {
+    throw new Error("Source image length did not match its object metadata");
+  }
+
+  let metadata;
+
+  try {
+    metadata = await sharp(input, { limitInputPixels: maxPixels }).metadata();
+  } catch {
+    throw new Error("Source image is not a readable PNG, JPG, or WEBP file");
+  }
+
+  if (metadata.format !== expectedFormat) {
+    throw new Error(`Source image signature does not match .${extension}`);
+  }
+
+  if (
+    !Number.isSafeInteger(metadata.width) ||
+    !Number.isSafeInteger(metadata.height) ||
+    metadata.width <= 0 ||
+    metadata.height <= 0
+  ) {
+    throw new Error("Source image has invalid dimensions");
+  }
+
+  if (metadata.width > maxDimension || metadata.height > maxDimension) {
+    throw new Error(
+      `Source image dimensions must not exceed ${maxDimension}px on either side`,
+    );
+  }
+
+  const pixelCount = metadata.width * metadata.height;
+
+  if (!Number.isSafeInteger(pixelCount) || pixelCount > maxPixels) {
+    throw new Error(`Source image exceeds the ${maxPixels}-pixel limit`);
+  }
+
+  return { input, contentType: expectedContentType };
 }
 
 async function getJob(jobId) {
@@ -316,6 +431,17 @@ async function processS3Record(record) {
     return { skipped: true, reason: "job-not-uploadable" };
   }
 
+  const sourceVersionId = record.s3?.object?.versionId;
+
+  if (typeof sourceVersionId !== "string" || sourceVersionId.length === 0) {
+    await markJobFailed(
+      sourceDetails.jobId,
+      new Error("Source upload event did not include an object version"),
+      "UPLOADING",
+    );
+    return { jobId: sourceDetails.jobId, status: "FAILED" };
+  }
+
   if (!job.prompt || !job.style) {
     await markJobFailed(
       sourceDetails.jobId,
@@ -342,15 +468,18 @@ async function processS3Record(record) {
   let failureStatus = "GENERATING";
 
   try {
-    const source = await s3.send(
-      new GetObjectCommand({
-        Bucket: sourceBucket,
-        Key: sourceKey,
-      }),
-    );
+    const source = await getValidatedSourceImage({
+      bucket: sourceBucket,
+      extension: sourceDetails.extension,
+      key: sourceKey,
+      maxBytes: requiredPositiveIntegerEnvironment("MAX_SOURCE_IMAGE_BYTES"),
+      maxDimension: requiredPositiveIntegerEnvironment("MAX_SOURCE_IMAGE_DIMENSION"),
+      maxPixels: requiredPositiveIntegerEnvironment("MAX_SOURCE_IMAGE_PIXELS"),
+      versionId: sourceVersionId,
+    });
     const output = await generateImage({
-      input: await bodyToBuffer(source.Body),
-      contentType: source.ContentType ?? sourceContentType(sourceDetails.extension),
+      input: source.input,
+      contentType: source.contentType,
       extension: sourceDetails.extension,
       prompt: job.prompt,
       style: job.style,
@@ -407,6 +536,9 @@ export async function handler(event) {
   requiredEnvironment("DYNAMODB_JOBS_TABLE");
   requiredEnvironment("IMAGE_GENERATION_MODEL");
   requiredEnvironment("IMAGE_GENERATION_BACKGROUND");
+  requiredPositiveIntegerEnvironment("MAX_SOURCE_IMAGE_BYTES");
+  requiredPositiveIntegerEnvironment("MAX_SOURCE_IMAGE_DIMENSION");
+  requiredPositiveIntegerEnvironment("MAX_SOURCE_IMAGE_PIXELS");
   requiredEnvironment("OPENAI_API_KEY_SECRET_ARN");
   requiredEnvironment("SOURCE_BUCKET");
 

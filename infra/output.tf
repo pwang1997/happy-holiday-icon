@@ -121,14 +121,15 @@ output "cognito_issuer" {
 output "app_environment" {
   description = "Non-secret environment values required by the Next.js runtime."
   value = {
-    AWS_REGION            = var.aws_region
-    AWS_S3_BUCKET         = aws_s3_bucket.images.bucket
-    AWS_S3_FINAL_BUCKET   = aws_s3_bucket.final_images.bucket
-    DYNAMODB_JOBS_TABLE   = aws_dynamodb_table.image_jobs.name
-    DYNAMODB_USAGE_TABLE  = aws_dynamodb_table.anonymous_usage.name
-    COGNITO_USER_POOL_ID  = aws_cognito_user_pool.users.id
-    COGNITO_WEB_CLIENT_ID = aws_cognito_user_pool_client.web.id
-    COGNITO_DOMAIN        = "https://${aws_cognito_user_pool_domain.web.domain}.auth.${var.aws_region}.amazoncognito.com"
-    COGNITO_ISSUER        = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.users.id}"
+    AWS_REGION             = var.aws_region
+    AWS_S3_BUCKET          = aws_s3_bucket.images.bucket
+    AWS_S3_FINAL_BUCKET    = aws_s3_bucket.final_images.bucket
+    IMAGE_MAX_UPLOAD_BYTES = var.max_source_image_bytes
+    DYNAMODB_JOBS_TABLE    = aws_dynamodb_table.image_jobs.name
+    DYNAMODB_USAGE_TABLE   = aws_dynamodb_table.anonymous_usage.name
+    COGNITO_USER_POOL_ID   = aws_cognito_user_pool.users.id
+    COGNITO_WEB_CLIENT_ID  = aws_cognito_user_pool_client.web.id
+    COGNITO_DOMAIN         = "https://${aws_cognito_user_pool_domain.web.domain}.auth.${var.aws_region}.amazoncognito.com"
+    COGNITO_ISSUER         = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.users.id}"
   }
 }

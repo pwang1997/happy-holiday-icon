@@ -54,6 +54,39 @@ variable "temporary_object_retention_days" {
   }
 }
 
+variable "max_source_image_bytes" {
+  type        = number
+  description = "Maximum byte size accepted for one browser-uploaded source image."
+  default     = 10485760
+
+  validation {
+    condition     = var.max_source_image_bytes >= 1024 && var.max_source_image_bytes <= 26214400
+    error_message = "max_source_image_bytes must be between 1 KiB and 25 MiB."
+  }
+}
+
+variable "max_source_image_dimension" {
+  type        = number
+  description = "Maximum width or height accepted for one source image."
+  default     = 4096
+
+  validation {
+    condition     = var.max_source_image_dimension >= 32 && var.max_source_image_dimension <= 16384
+    error_message = "max_source_image_dimension must be between 32 and 16384 pixels."
+  }
+}
+
+variable "max_source_image_pixels" {
+  type        = number
+  description = "Maximum decoded pixel count accepted for one source image."
+  default     = 16777216
+
+  validation {
+    condition     = var.max_source_image_pixels >= 1024 && var.max_source_image_pixels <= 268435456
+    error_message = "max_source_image_pixels must be between 1024 and 268435456 pixels."
+  }
+}
+
 variable "image_generation_visibility_timeout_seconds" {
   type        = number
   description = "SQS visibility timeout for a source-image generation job. Keep this at least six times the generation Lambda timeout."

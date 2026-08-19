@@ -35,7 +35,11 @@ function createService({ job = JOB, downloadUrl = null, onDownload } = {}) {
       return downloadUrl;
     },
     getImageJob: async () => job,
-    getTemporaryImageUploadUrl: async () => "https://upload.example.test",
+    getTemporaryImageUploadPost: async () => ({
+      url: "https://upload.example.test",
+      fields: { key: JOB.sourceKey },
+      maxBytes: 10 * 1024 * 1024,
+    }),
   });
 }
 
@@ -74,7 +78,7 @@ test("validates image-job admission input", () => {
   );
 });
 
-test("creates an upload job with a presigned URL", async () => {
+test("creates an upload job with a size-limited presigned POST", async () => {
   const result = await createService().createImageUploadJob({
     contentType: "image/png",
     prompt: "A cheerful snowman",
@@ -86,7 +90,11 @@ test("creates an upload job with a presigned URL", async () => {
     jobId: JOB.jobId,
     status: "UPLOADING",
     sourceKey: JOB.sourceKey,
-    uploadUrl: "https://upload.example.test",
+    upload: {
+      url: "https://upload.example.test",
+      fields: { key: JOB.sourceKey },
+      maxBytes: 10 * 1024 * 1024,
+    },
     expiresAt: JOB.expiresAt,
   });
 });

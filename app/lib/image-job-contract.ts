@@ -14,11 +14,17 @@ export type ImageUrl = {
   url: string;
 };
 
+export type ImageUploadPost = {
+  url: string;
+  fields: Record<string, string>;
+  maxBytes: number;
+};
+
 export type ImageJobCreationResponse = {
   jobId: string;
   status: "UPLOADING";
   sourceKey: string;
-  uploadUrl: string;
+  upload: ImageUploadPost;
   expiresAt: number;
 };
 
@@ -47,6 +53,18 @@ function isImageUrl(value: unknown): value is ImageUrl {
   );
 }
 
+function isImageUploadPost(value: unknown): value is ImageUploadPost {
+  return (
+    isObject(value) &&
+    typeof value.url === "string" &&
+    typeof value.maxBytes === "number" &&
+    Number.isSafeInteger(value.maxBytes) &&
+    value.maxBytes > 0 &&
+    isObject(value.fields) &&
+    Object.values(value.fields).every((field) => typeof field === "string")
+  );
+}
+
 export function isImageJobCreationResponse(
   value: unknown,
 ): value is ImageJobCreationResponse {
@@ -55,7 +73,7 @@ export function isImageJobCreationResponse(
     typeof value.jobId === "string" &&
     value.status === "UPLOADING" &&
     typeof value.sourceKey === "string" &&
-    typeof value.uploadUrl === "string" &&
+    isImageUploadPost(value.upload) &&
     typeof value.expiresAt === "number"
   );
 }

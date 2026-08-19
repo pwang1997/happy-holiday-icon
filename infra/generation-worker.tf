@@ -48,7 +48,7 @@ resource "aws_iam_role_policy" "image_generator" {
       {
         Sid      = "ReadUploadedSources"
         Effect   = "Allow"
-        Action   = ["s3:GetObject"]
+        Action   = ["s3:GetObject", "s3:GetObjectVersion"]
         Resource = "${aws_s3_bucket.images.arn}/uploads/*"
       },
       {
@@ -105,6 +105,9 @@ resource "aws_lambda_function" "image_generator" {
       DYNAMODB_JOBS_TABLE         = aws_dynamodb_table.image_jobs.name
       IMAGE_GENERATION_BACKGROUND = var.image_generation_background
       IMAGE_GENERATION_MODEL      = var.image_generation_model
+      MAX_SOURCE_IMAGE_BYTES      = var.max_source_image_bytes
+      MAX_SOURCE_IMAGE_DIMENSION  = var.max_source_image_dimension
+      MAX_SOURCE_IMAGE_PIXELS     = var.max_source_image_pixels
       OPENAI_API_KEY_SECRET_ARN   = aws_secretsmanager_secret.openai_api_key.arn
       SOURCE_BUCKET               = aws_s3_bucket.images.bucket
     }

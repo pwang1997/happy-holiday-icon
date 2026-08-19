@@ -10,7 +10,14 @@ const JOB = {
   jobId: "a9f4a6d7-ecf5-448d-a7ce-51954d3a234d",
   status: "UPLOADING",
   sourceKey: "uploads/a9f4a6d7-ecf5-448d-a7ce-51954d3a234d/source.png",
-  uploadUrl: "https://upload.example.test/source.png",
+  upload: {
+    url: "https://upload.example.test/source.png",
+    fields: {
+      "Content-Type": "image/png",
+      key: "uploads/a9f4a6d7-ecf5-448d-a7ce-51954d3a234d/source.png",
+    },
+    maxBytes: 10 * 1024 * 1024,
+  },
   expiresAt: 4_102_444_800,
 };
 
