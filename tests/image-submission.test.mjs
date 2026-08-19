@@ -5,7 +5,6 @@ import {
   ImageSubmissionError,
   parseImageSubmission,
 } from "../app/lib/image-submission.ts";
-import { TrialLimitError } from "../app/lib/usage.ts";
 
 const JOB = {
   jobId: "a9f4a6d7-ecf5-448d-a7ce-51954d3a234d",
@@ -75,7 +74,12 @@ test("fails the unuploaded job when the anonymous trial is exhausted", async () 
   const updates = [];
   const service = createService({
     recordUsage: async () => {
-      throw new TrialLimitError();
+      const error = Object.assign(
+        new Error("Anonymous trial limit reached"),
+        { code: "TRIAL_LIMIT_REACHED" },
+      );
+      error.name = "TrialLimitError";
+      throw error;
     },
     onUpdate: (...arguments_) => updates.push(arguments_),
   });

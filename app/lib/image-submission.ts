@@ -7,8 +7,8 @@ import {
 import { updateImageJob } from "./jobs";
 import {
   MAX_FREE_TRIALS,
+  isTrialLimitError,
   recordUsage,
-  TrialLimitError,
   usageOwner,
   type UsageIdentity,
 } from "./usage";
@@ -86,7 +86,7 @@ export function createImageSubmissionService({
       try {
         await saveUsage(usageIdentity);
       } catch (error) {
-        if (error instanceof TrialLimitError) {
+        if (isTrialLimitError(error)) {
           await markJobFailed(
             updateJob,
             job.jobId,

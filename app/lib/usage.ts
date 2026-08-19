@@ -9,12 +9,24 @@ import {
 import { createHash } from "node:crypto";
 
 export const MAX_FREE_TRIALS = 5;
+export const TRIAL_LIMIT_ERROR_CODE = "TRIAL_LIMIT_REACHED";
 
 export class TrialLimitError extends Error {
+  readonly code = TRIAL_LIMIT_ERROR_CODE;
+
   constructor() {
     super("Anonymous trial limit reached");
     this.name = "TrialLimitError";
   }
+}
+
+export function isTrialLimitError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === TRIAL_LIMIT_ERROR_CODE
+  );
 }
 
 export type UsageIdentity =
