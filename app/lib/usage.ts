@@ -21,6 +21,11 @@ export type UsageIdentity =
   | { kind: "anonymous"; sessionToken: string }
   | { kind: "authenticated"; subject: string };
 
+export type UsageOwner = {
+  ownerId: string;
+  ownerType: UsageIdentity["kind"];
+};
+
 const USAGE_TTL_SECONDS = 365 * 24 * 60 * 60;
 let client: DynamoDBDocumentClient | undefined;
 
@@ -56,7 +61,7 @@ function nowInSeconds() {
   return Math.floor(Date.now() / 1000);
 }
 
-function usageId(identity: UsageIdentity) {
+export function usageIdentityId(identity: UsageIdentity) {
   if (identity.kind === "authenticated") {
     return `USER#${identity.subject}`;
   }
@@ -65,6 +70,13 @@ function usageId(identity: UsageIdentity) {
     .update(identity.sessionToken)
     .digest("hex");
   return `ANONYMOUS#${digest}`;
+}
+
+export function usageOwner(identity: UsageIdentity): UsageOwner {
+  return {
+    ownerId: usageIdentityId(identity),
+    ownerType: identity.kind,
+  };
 }
 
 export async function recordUsage(identity: UsageIdentity) {
@@ -89,7 +101,7 @@ export async function recordUsage(identity: UsageIdentity) {
   const result = await getClient().send(
     new UpdateCommand({
       TableName: getTableName(),
-      Key: { usage_id: usageId(identity) },
+      Key: { usage_id: usageIdentityId(identity) },
       UpdateExpression: `SET ${updateParts.join(", ")}`,
       ...(isAnonymous
         ? {

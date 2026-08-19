@@ -3,14 +3,18 @@ import test from "node:test";
 import {
   createImageJobService,
   ImageJobServiceError,
-  parseImageJobCreation,
+  parseImageJobAdmission,
 } from "../app/lib/image-job-service.ts";
 
-const IMAGE_HASH = "a".repeat(64);
+const JOB_ID = "a9f4a6d7-ecf5-448d-a7ce-51954d3a234d";
 const JOB = {
   jobId: "job-123",
   status: "UPLOADING",
-  sourceKey: `uploads/${IMAGE_HASH}/source.png`,
+  ownerId: "ANONYMOUS#hash",
+  ownerType: "anonymous",
+  sourceKey: `uploads/${JOB_ID}/source.png`,
+  prompt: "A cheerful snowman",
+  style: "playful",
   derivativeKeys: [],
   error: null,
   createdAt: 1,
@@ -30,19 +34,37 @@ function createService({ job = JOB, downloadUrl = null, onDownload } = {}) {
   });
 }
 
-test("validates image-job creation input", () => {
+test("validates image-job admission input", () => {
   assert.deepEqual(
-    parseImageJobCreation({ contentType: "image/png", imageHash: IMAGE_HASH }),
-    { contentType: "image/png", imageHash: IMAGE_HASH },
+    parseImageJobAdmission({
+      contentType: "image/png",
+      prompt: " A cheerful snowman ",
+      style: "playful",
+    }),
+    {
+      contentType: "image/png",
+      prompt: "A cheerful snowman",
+      style: "playful",
+    },
   );
 
   assert.throws(
-    () => parseImageJobCreation({ contentType: "image/gif", imageHash: IMAGE_HASH }),
+    () =>
+      parseImageJobAdmission({
+        contentType: "image/gif",
+        prompt: "A cheerful snowman",
+        style: "playful",
+      }),
     (error) => error instanceof ImageJobServiceError && error.status === 415,
   );
 
   assert.throws(
-    () => parseImageJobCreation({ contentType: "image/png", imageHash: "bad" }),
+    () =>
+      parseImageJobAdmission({
+        contentType: "image/png",
+        prompt: "",
+        style: "playful",
+      }),
     (error) => error instanceof ImageJobServiceError && error.status === 400,
   );
 });
@@ -50,7 +72,9 @@ test("validates image-job creation input", () => {
 test("creates an upload job with a presigned URL", async () => {
   const result = await createService().createImageUploadJob({
     contentType: "image/png",
-    imageHash: IMAGE_HASH,
+    prompt: "A cheerful snowman",
+    style: "playful",
+    owner: { ownerId: "ANONYMOUS#hash", ownerType: "anonymous" },
   });
 
   assert.deepEqual(result, {
@@ -68,9 +92,9 @@ test("returns signed URLs only for available, supported derivatives", async () =
     ...JOB,
     status: "READY",
     derivativeKeys: [
-      `images/${IMAGE_HASH}-holiday-icon/32.webp`,
-      `images/${IMAGE_HASH}-holiday-icon/48.webp`,
-      `images/${IMAGE_HASH}-holiday-icon/original.png`,
+      `images/${JOB_ID}-holiday-icon/32.webp`,
+      `images/${JOB_ID}-holiday-icon/48.webp`,
+      `images/${JOB_ID}-holiday-icon/original.png`,
     ],
   };
   const service = createService({
@@ -83,23 +107,23 @@ test("returns signed URLs only for available, supported derivatives", async () =
 
   assert.deepEqual(result.imageUrls, [
     {
-      key: `images/${IMAGE_HASH}-holiday-icon/32.webp`,
+      key: `images/${JOB_ID}-holiday-icon/32.webp`,
       size: 32,
       url: "https://download.example.test",
     },
     {
-      key: `images/${IMAGE_HASH}-holiday-icon/48.webp`,
+      key: `images/${JOB_ID}-holiday-icon/48.webp`,
       size: 48,
       url: "https://download.example.test",
     },
   ]);
   assert.deepEqual(downloadRequests, [
     [
-      `images/${IMAGE_HASH}-holiday-icon/32.webp`,
+      `images/${JOB_ID}-holiday-icon/32.webp`,
       { fileName: "happy-holiday-icon-32px.webp" },
     ],
     [
-      `images/${IMAGE_HASH}-holiday-icon/48.webp`,
+      `images/${JOB_ID}-holiday-icon/48.webp`,
       { fileName: "happy-holiday-icon-48px.webp" },
     ],
   ]);

@@ -12,14 +12,24 @@ import {
   IMAGE_JOB_STATUSES,
   type ImageJobStatus,
 } from "./image-job-contract";
+import type { Style } from "./instructions";
 
 export const JOB_STATUSES = IMAGE_JOB_STATUSES;
 export type JobStatus = ImageJobStatus;
 
+export type ImageJobOwner = {
+  ownerId: string;
+  ownerType: "anonymous" | "authenticated";
+};
+
 export type ImageJob = {
   jobId: string;
   status: JobStatus;
+  ownerId: string;
+  ownerType: ImageJobOwner["ownerType"];
   sourceKey: string;
+  prompt: string;
+  style: Style;
   derivativeKeys: string[];
   error: string | null;
   createdAt: number;
@@ -72,6 +82,10 @@ function toImageJob(item: Record<string, unknown>): ImageJob | null {
   const jobId = item.job_id;
   const status = item.status;
   const sourceKey = item.source_key;
+  const prompt = item.prompt;
+  const style = item.style;
+  const ownerId = item.owner_id;
+  const ownerType = item.owner_type;
   const createdAt = item.created_at;
   const updatedAt = item.updated_at;
   const expiresAt = item.expires_at;
@@ -80,6 +94,10 @@ function toImageJob(item: Record<string, unknown>): ImageJob | null {
     typeof jobId !== "string" ||
     !JOB_STATUSES.includes(status as JobStatus) ||
     typeof sourceKey !== "string" ||
+    typeof prompt !== "string" ||
+    typeof style !== "string" ||
+    typeof ownerId !== "string" ||
+    (ownerType !== "anonymous" && ownerType !== "authenticated") ||
     typeof createdAt !== "number" ||
     typeof updatedAt !== "number" ||
     typeof expiresAt !== "number"
@@ -90,7 +108,11 @@ function toImageJob(item: Record<string, unknown>): ImageJob | null {
   return {
     jobId,
     status: status as JobStatus,
+    ownerId,
+    ownerType,
     sourceKey,
+    prompt,
+    style: style as Style,
     derivativeKeys: asStringArray(item.derivative_keys),
     error: typeof item.error === "string" ? item.error : null,
     createdAt,
@@ -99,14 +121,28 @@ function toImageJob(item: Record<string, unknown>): ImageJob | null {
   };
 }
 
-export async function createImageJob(contentType: string, imageHash: string) {
+export async function createImageJob({
+  contentType,
+  owner,
+  prompt,
+  style,
+}: {
+  contentType: string;
+  owner: ImageJobOwner;
+  prompt: string;
+  style: Style;
+}) {
   const jobId = crypto.randomUUID();
   const createdAt = nowInSeconds();
-  const sourceKey = `uploads/${imageHash}/source.${extensionForContentType(contentType)}`;
+  const sourceKey = `uploads/${jobId}/source.${extensionForContentType(contentType)}`;
   const job: ImageJob = {
     jobId,
     status: "UPLOADING",
+    ownerId: owner.ownerId,
+    ownerType: owner.ownerType,
     sourceKey,
+    prompt,
+    style,
     derivativeKeys: [],
     error: null,
     createdAt,
@@ -120,7 +156,11 @@ export async function createImageJob(contentType: string, imageHash: string) {
       Item: {
         job_id: job.jobId,
         status: job.status,
+        owner_id: job.ownerId,
+        owner_type: job.ownerType,
         source_key: job.sourceKey,
+        prompt: job.prompt,
+        style: job.style,
         derivative_keys: job.derivativeKeys,
         created_at: job.createdAt,
         updated_at: job.updatedAt,
@@ -207,18 +247,4 @@ export function extensionForContentType(contentType: string) {
     default:
       throw new Error("Unsupported image type");
   }
-}
-
-export function isImageHash(value: string) {
-  return /^[a-f0-9]{64}$/.test(value);
-}
-
-export function imageHashFromSourceKey(sourceKey: string) {
-  const match = sourceKey.match(/^uploads\/([a-f0-9]{64})\/source\.[a-z]+$/);
-
-  if (!match) {
-    throw new Error("Image job has an invalid source key");
-  }
-
-  return match[1];
 }

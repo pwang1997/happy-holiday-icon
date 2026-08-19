@@ -6,14 +6,14 @@ import {
   isImageJobStatusResponse,
 } from "../app/lib/image-job-contract.ts";
 
-const IMAGE_HASH = "a".repeat(64);
+const JOB_ID = "a9f4a6d7-ecf5-448d-a7ce-51954d3a234d";
 
 test("validates the image-job creation response contract", () => {
   assert.equal(
     isImageJobCreationResponse({
       jobId: "job-123",
       status: "UPLOADING",
-      sourceKey: `uploads/${IMAGE_HASH}/source.png`,
+      sourceKey: `uploads/${JOB_ID}/source.png`,
       uploadUrl: "https://upload.example.test",
       expiresAt: 4_102_444_800,
     }),
@@ -27,11 +27,11 @@ test("validates a ready image-job response with derivatives", () => {
     isImageJobStatusResponse({
       jobId: "job-123",
       status: "READY",
-      sourceKey: `uploads/${IMAGE_HASH}/source.png`,
-      derivativeKeys: [`images/${IMAGE_HASH}-holiday-icon/32.webp`],
+      sourceKey: `uploads/${JOB_ID}/source.png`,
+      derivativeKeys: [`images/${JOB_ID}-holiday-icon/32.webp`],
       imageUrls: [
         {
-          key: `images/${IMAGE_HASH}-holiday-icon/32.webp`,
+          key: `images/${JOB_ID}-holiday-icon/32.webp`,
           size: 32,
           url: "https://download.example.test",
         },

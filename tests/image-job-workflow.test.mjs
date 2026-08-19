@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { runImageJobWorkflow } from "../app/lib/image-job-workflow.ts";
 
-const IMAGE_HASH = "a".repeat(64);
+const JOB_ID = "a9f4a6d7-ecf5-448d-a7ce-51954d3a234d";
 
 function response(body, status = 200) {
   return Response.json(body, { status });
@@ -12,11 +12,11 @@ function readyJobResponse() {
   return {
     jobId: "job-123",
     status: "READY",
-    sourceKey: `uploads/${IMAGE_HASH}/source.png`,
-    derivativeKeys: [`images/${IMAGE_HASH}-holiday-icon/32.webp`],
+    sourceKey: `uploads/${JOB_ID}/source.png`,
+    derivativeKeys: [`images/${JOB_ID}-holiday-icon/32.webp`],
     imageUrls: [
       {
-        key: `images/${IMAGE_HASH}-holiday-icon/32.webp`,
+        key: `images/${JOB_ID}-holiday-icon/32.webp`,
         size: 32,
         url: "https://download.example.test/32.webp",
       },
@@ -36,19 +36,18 @@ function submissionFormData() {
   return formData;
 }
 
-test("runs the create, upload, submit, and poll workflow", async () => {
+test("admits a job, uploads its source, and polls without waiting for generation", async () => {
   const statuses = [];
   const requests = [];
   const responses = [
     response({
       jobId: "job-123",
       status: "UPLOADING",
-      sourceKey: `uploads/${IMAGE_HASH}/source.png`,
+      sourceKey: `uploads/${JOB_ID}/source.png`,
       uploadUrl: "https://upload.example.test/source.png",
       expiresAt: 4_102_444_800,
-    }, 201),
+    }, 202),
     new Response(null, { status: 200 }),
-    response({ jobId: "job-123", status: "RESHAPING" }, 202),
     response(readyJobResponse()),
   ];
 
@@ -59,30 +58,27 @@ test("runs the create, upload, submit, and poll workflow", async () => {
       assert.ok(next, "received an unexpected fetch call");
       return next;
     },
-    hashImage: async () => IMAGE_HASH,
     onStatus: (status) => statuses.push(status),
     wait: async () => {},
   });
 
-  assert.deepEqual(statuses, ["GENERATING", "RESHAPING", "READY"]);
+  assert.deepEqual(statuses, ["UPLOADING", "READY"]);
   assert.deepEqual(imageUrls, readyJobResponse().imageUrls);
   assert.deepEqual(
     requests.map(({ input }) => input),
     [
-      "/api/jobs",
-      "https://upload.example.test/source.png",
       "/api/submit",
+      "https://upload.example.test/source.png",
       "/api/jobs/job-123",
     ],
   );
 });
 
-test("surfaces an API error when job creation fails", async () => {
+test("surfaces an API error when job admission fails", async () => {
   await assert.rejects(
     () =>
       runImageJobWorkflow(submissionFormData(), {
         fetchImpl: async () => response({ error: "Trial unavailable" }, 503),
-        hashImage: async () => IMAGE_HASH,
         onStatus: () => {},
         wait: async () => {},
       }),

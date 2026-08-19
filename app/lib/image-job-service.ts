@@ -2,7 +2,7 @@ import {
   createImageJob,
   getImageJob,
   isExpired,
-  isImageHash,
+  type ImageJobOwner,
 } from "./jobs";
 import type {
   ImageJobCreationResponse,
@@ -12,8 +12,10 @@ import {
   getImageDownloadUrlIfExists,
   getTemporaryImageUploadUrl,
 } from "./s3";
+import { STYLE_INSTRUCTIONS, type Style } from "./instructions";
 
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const MAX_PROMPT_LENGTH = 500;
 
 type ImageJobServiceDependencies = {
   createImageJob: typeof createImageJob;
@@ -32,17 +34,25 @@ export class ImageJobServiceError extends Error {
   }
 }
 
-export type ImageJobCreationInput = {
+export type ImageJobAdmissionInput = {
   contentType: string;
-  imageHash: string;
+  prompt: string;
+  style: Style;
 };
 
-export function parseImageJobCreation(payload: unknown): ImageJobCreationInput {
+type ImageJobCreationInput = ImageJobAdmissionInput & {
+  owner: ImageJobOwner;
+};
+
+export function parseImageJobAdmission(payload: unknown): ImageJobAdmissionInput {
   if (!payload || typeof payload !== "object") {
     throw new ImageJobServiceError("Request body must be JSON.", 400);
   }
 
-  const { contentType, imageHash } = payload as Record<string, unknown>;
+  const { contentType, prompt: promptValue, style } = payload as Record<
+    string,
+    unknown
+  >;
 
   if (typeof contentType !== "string" || !ALLOWED_IMAGE_TYPES.has(contentType)) {
     throw new ImageJobServiceError(
@@ -51,11 +61,30 @@ export function parseImageJobCreation(payload: unknown): ImageJobCreationInput {
     );
   }
 
-  if (typeof imageHash !== "string" || !isImageHash(imageHash)) {
-    throw new ImageJobServiceError("A valid image hash is required.", 400);
+  if (typeof promptValue !== "string" || promptValue.trim().length === 0) {
+    throw new ImageJobServiceError(
+      "Please describe the icon you want to create.",
+      400,
+    );
   }
 
-  return { contentType, imageHash };
+  const prompt = promptValue.trim();
+
+  if (prompt.length > MAX_PROMPT_LENGTH) {
+    throw new ImageJobServiceError(
+      `The description must be ${MAX_PROMPT_LENGTH} characters or fewer.`,
+      400,
+    );
+  }
+
+  if (
+    typeof style !== "string" ||
+    !Object.prototype.hasOwnProperty.call(STYLE_INSTRUCTIONS, style)
+  ) {
+    throw new ImageJobServiceError("Please choose a supported style.", 400);
+  }
+
+  return { contentType, prompt, style: style as Style };
 }
 
 function derivativeSize(key: string) {
@@ -75,11 +104,10 @@ export function createImageJobService({
 }: ImageJobServiceDependencies) {
   return {
     async createImageUploadJob(
-      payload: unknown,
+      input: ImageJobCreationInput,
     ): Promise<ImageJobCreationResponse> {
-      const { contentType, imageHash } = parseImageJobCreation(payload);
-      const job = await createJob(contentType, imageHash);
-      const uploadUrl = await getUploadUrl(job.sourceKey, contentType);
+      const job = await createJob(input);
+      const uploadUrl = await getUploadUrl(job.sourceKey, input.contentType);
 
       return {
         jobId: job.jobId,

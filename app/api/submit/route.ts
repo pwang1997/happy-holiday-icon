@@ -5,42 +5,26 @@ import {
 } from "@/app/lib/auth-service";
 import {
   ImageSubmissionError,
+  imageSubmissionService,
   parseImageSubmission,
-  submitImageJob,
   type ImageSubmissionInput,
 } from "@/app/lib/image-submission";
-import ImageGenProvider, {
-  ImageGenerationConfigurationError,
-} from "@/app/lib/llm/image-gen";
 import { setTrialSessionCookie } from "@/app/lib/trial-session-cookie";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
-  let imageGenerator: ImageGenProvider;
+  let payload: unknown;
 
   try {
-    imageGenerator = new ImageGenProvider();
-  } catch (error) {
-    if (error instanceof ImageGenerationConfigurationError) {
-      return errorResponse(error.message, 503);
-    }
-
-    console.error("Unable to configure image generation", error);
-    return errorResponse("The image generator is not configured.", 503);
-  }
-
-  let formData: FormData;
-
-  try {
-    formData = await request.formData();
+    payload = await request.json();
   } catch {
-    return errorResponse("The form submission could not be read.", 400);
+    return errorResponse("Request body must be JSON.", 400);
   }
 
   let input: ImageSubmissionInput;
 
   try {
-    input = parseImageSubmission(formData);
+    input = parseImageSubmission(payload);
   } catch (error) {
     if (error instanceof ImageSubmissionError) {
       return errorResponse(error.message, error.status);
@@ -66,8 +50,7 @@ export async function POST(request: NextRequest) {
   const { trialSession, usageIdentity } = submissionAuth;
 
   try {
-    const result = await submitImageJob({
-      generator: imageGenerator,
+    const result = await imageSubmissionService.admitImageJob({
       input,
       usageIdentity,
     });
@@ -75,8 +58,6 @@ export async function POST(request: NextRequest) {
     return setTrialSessionCookie(
       NextResponse.json(
         {
-          jobId: input.jobId,
-          status: "RESHAPING",
           ...result,
         },
         { status: 202 },
