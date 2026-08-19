@@ -18,10 +18,13 @@ const JOB = {
   expiresAt: 4_102_444_800,
 };
 
-function createService({ job = JOB, downloadUrl = null } = {}) {
+function createService({ job = JOB, downloadUrl = null, onDownload } = {}) {
   return createImageJobService({
     createImageJob: async () => job,
-    getImageDownloadUrlIfExists: async () => downloadUrl,
+    getImageDownloadUrlIfExists: async (...arguments_) => {
+      onDownload?.(...arguments_);
+      return downloadUrl;
+    },
     getImageJob: async () => job,
     getTemporaryImageUploadUrl: async () => "https://upload.example.test",
   });
@@ -60,6 +63,7 @@ test("creates an upload job with a presigned URL", async () => {
 });
 
 test("returns signed URLs only for available, supported derivatives", async () => {
+  const downloadRequests = [];
   const readyJob = {
     ...JOB,
     status: "READY",
@@ -72,6 +76,7 @@ test("returns signed URLs only for available, supported derivatives", async () =
   const service = createService({
     job: readyJob,
     downloadUrl: "https://download.example.test",
+    onDownload: (...arguments_) => downloadRequests.push(arguments_),
   });
 
   const result = await service.getImageJobStatus(readyJob.jobId);
@@ -87,6 +92,16 @@ test("returns signed URLs only for available, supported derivatives", async () =
       size: 48,
       url: "https://download.example.test",
     },
+  ]);
+  assert.deepEqual(downloadRequests, [
+    [
+      `images/${IMAGE_HASH}-holiday-icon/32.webp`,
+      { fileName: "happy-holiday-icon-32px.webp" },
+    ],
+    [
+      `images/${IMAGE_HASH}-holiday-icon/48.webp`,
+      { fileName: "happy-holiday-icon-48px.webp" },
+    ],
   ]);
 });
 

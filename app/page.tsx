@@ -206,7 +206,7 @@ function Page() {
                     </div>
                     <a
                       href={image.url}
-                      download={`happy-holiday-icon-${image.size}.webp`}
+                      download={`happy-holiday-icon-${image.size}px.webp`}
                       className="inline-flex rounded-lg border border-white/15 px-3 py-2 text-xs font-medium text-slate-200 transition hover:border-amber-300 hover:text-amber-200"
                     >
                       Download {image.size}px

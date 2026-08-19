@@ -63,6 +63,10 @@ function derivativeSize(key: string) {
   return match ? Number(match[1]) : null;
 }
 
+function derivativeDownloadFileName(size: number) {
+  return `happy-holiday-icon-${size}px.webp`;
+}
+
 export function createImageJobService({
   createImageJob: createJob,
   getImageDownloadUrlIfExists: getDownloadUrl,
@@ -104,7 +108,9 @@ export function createImageJobService({
                     return null;
                   }
 
-                  const url = await getDownloadUrl(key);
+                  const url = await getDownloadUrl(key, {
+                    fileName: derivativeDownloadFileName(size),
+                  });
                   return url ? { key, size, url } : null;
                 }),
               )

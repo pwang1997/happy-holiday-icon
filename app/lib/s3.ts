@@ -98,12 +98,25 @@ export async function getTemporaryImage(key: string) {
   };
 }
 
-export async function getImageDownloadUrl(key: string, expiresIn = 3600) {
+type ImageDownloadOptions = {
+  expiresIn?: number;
+  fileName?: string;
+};
+
+export async function getImageDownloadUrl(
+  key: string,
+  { expiresIn = 3600, fileName }: ImageDownloadOptions = {},
+) {
   return getSignedUrl(
     getS3Client(),
     new GetObjectCommand({
       Bucket: getS3Bucket("AWS_S3_FINAL_BUCKET"),
       Key: key,
+      ...(fileName
+        ? {
+            ResponseContentDisposition: `attachment; filename="${fileName}"`,
+          }
+        : {}),
     }),
     { expiresIn },
   );
@@ -128,7 +141,7 @@ function isMissingS3Object(error: unknown) {
 
 export async function getImageDownloadUrlIfExists(
   key: string,
-  expiresIn = 3600,
+  options?: ImageDownloadOptions,
 ) {
   try {
     await getS3Client().send(
@@ -145,5 +158,5 @@ export async function getImageDownloadUrlIfExists(
     throw error;
   }
 
-  return getImageDownloadUrl(key, expiresIn);
+  return getImageDownloadUrl(key, options);
 }
