@@ -1,17 +1,40 @@
+import {
+  getSubmissionAuth,
+  SubmissionAuthenticationError,
+} from "@/app/lib/auth-service";
 import { errorResponse } from "@/app/lib/http-responses";
 import {
   imageJobService,
   ImageJobServiceError,
 } from "@/app/lib/image-job-service";
+import { usageOwner } from "@/app/lib/usage";
+import { NextRequest } from "next/server";
 
 export async function GET(
-  _request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> },
 ) {
   const { jobId } = await params;
+  let submissionAuth;
 
   try {
-    return Response.json(await imageJobService.getImageJobStatus(jobId));
+    submissionAuth = await getSubmissionAuth(request);
+  } catch (error) {
+    if (error instanceof SubmissionAuthenticationError) {
+      return errorResponse(error.message, error.status);
+    }
+
+    console.error("Unable to resolve job authentication", error);
+    return errorResponse("Authentication is not configured.", 503);
+  }
+
+  try {
+    return Response.json(
+      await imageJobService.getImageJobStatus(
+        jobId,
+        usageOwner(submissionAuth.usageIdentity),
+      ),
+    );
   } catch (error) {
     if (error instanceof ImageJobServiceError) {
       return errorResponse(error.message, error.status);

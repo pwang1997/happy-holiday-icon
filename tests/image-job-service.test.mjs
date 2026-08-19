@@ -22,6 +22,11 @@ const JOB = {
   expiresAt: 4_102_444_800,
 };
 
+const JOB_OWNER = {
+  ownerId: JOB.ownerId,
+  ownerType: JOB.ownerType,
+};
+
 function createService({ job = JOB, downloadUrl = null, onDownload } = {}) {
   return createImageJobService({
     createImageJob: async () => job,
@@ -103,7 +108,7 @@ test("returns signed URLs only for available, supported derivatives", async () =
     onDownload: (...arguments_) => downloadRequests.push(arguments_),
   });
 
-  const result = await service.getImageJobStatus(readyJob.jobId);
+  const result = await service.getImageJobStatus(readyJob.jobId, JOB_OWNER);
 
   assert.deepEqual(result.imageUrls, [
     {
@@ -131,7 +136,7 @@ test("returns signed URLs only for available, supported derivatives", async () =
 
 test("returns not found for missing or expired jobs", async () => {
   await assert.rejects(
-    () => createService({ job: null }).getImageJobStatus("missing-job"),
+    () => createService({ job: null }).getImageJobStatus("missing-job", JOB_OWNER),
     (error) => error instanceof ImageJobServiceError && error.status === 404,
   );
 
@@ -139,7 +144,19 @@ test("returns not found for missing or expired jobs", async () => {
     () =>
       createService({ job: { ...JOB, expiresAt: 0 } }).getImageJobStatus(
         JOB.jobId,
+        JOB_OWNER,
       ),
+    (error) => error instanceof ImageJobServiceError && error.status === 404,
+  );
+});
+
+test("hides jobs from a different identity", async () => {
+  await assert.rejects(
+    () =>
+      createService().getImageJobStatus(JOB.jobId, {
+        ownerId: "USER#different-user",
+        ownerType: "authenticated",
+      }),
     (error) => error instanceof ImageJobServiceError && error.status === 404,
   );
 });

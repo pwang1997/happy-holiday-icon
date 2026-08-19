@@ -118,10 +118,17 @@ export function createImageJobService({
       };
     },
 
-    async getImageJobStatus(jobId: string): Promise<ImageJobStatusResponse> {
+    async getImageJobStatus(
+      jobId: string,
+      owner: ImageJobOwner,
+    ): Promise<ImageJobStatusResponse> {
       const job = await getJob(jobId);
 
       if (!job || isExpired(job)) {
+        throw new ImageJobServiceError("Image job not found.", 404);
+      }
+
+      if (job.ownerId !== owner.ownerId || job.ownerType !== owner.ownerType) {
         throw new ImageJobServiceError("Image job not found.", 404);
       }
 
