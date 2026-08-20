@@ -85,12 +85,17 @@ paths:
           application/json:
             schema:
               type: object
-              required: [contentType, prompt, style]
+              required: [contentType, contentLength, prompt, style]
               properties:
                 contentType:
                   type: string
                   enum: [image/png, image/jpeg, image/webp]
                   description: MIME type of the source file submitted to S3.
+                contentLength:
+                  type: integer
+                  minimum: 1
+                  maximum: 10485760
+                  description: Source-file byte length. The server pre-validates it against the same configured limit as the S3 upload policy; S3 remains authoritative.
                 prompt:
                   type: string
                   minLength: 1

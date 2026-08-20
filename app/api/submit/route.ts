@@ -1,18 +1,32 @@
-import { errorResponse } from "@/app/lib/http-responses";
 import {
   getSubmissionAuth,
   SubmissionAuthenticationError,
 } from "@/app/lib/auth-service";
+import { errorResponse } from "@/app/lib/http-responses";
 import {
   ImageSubmissionError,
   imageSubmissionService,
   parseImageSubmission,
   type ImageSubmissionInput,
+  validateSubmissionRequestContentLength,
 } from "@/app/lib/image-submission";
 import { setTrialSessionCookie } from "@/app/lib/trial-session-cookie";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
+  try {
+    validateSubmissionRequestContentLength(
+      request.headers.get("content-length"),
+    );
+  } catch (error) {
+    if (error instanceof ImageSubmissionError) {
+      return errorResponse(error.message, error.status);
+    }
+
+    console.error("Unable to validate image submission size", error);
+    return errorResponse("Unable to validate request size.", 503);
+  }
+
   let payload: unknown;
 
   try {

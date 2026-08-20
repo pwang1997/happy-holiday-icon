@@ -42,6 +42,7 @@ export async function runImageJobWorkflow(
     },
     body: JSON.stringify({
       contentType: image.type,
+      contentLength: image.size,
       prompt: String(formData.get("prompt") ?? ""),
       style: String(formData.get("style") ?? ""),
     }),

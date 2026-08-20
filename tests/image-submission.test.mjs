@@ -4,6 +4,7 @@ import {
   createImageSubmissionService,
   ImageSubmissionError,
   parseImageSubmission,
+  validateSubmissionRequestContentLength,
 } from "../app/lib/image-submission.ts";
 
 const JOB = {
@@ -23,6 +24,7 @@ const JOB = {
 
 const INPUT = {
   contentType: "image/png",
+  contentLength: 1024,
   prompt: "A cheerful snowman",
   style: "playful",
 };
@@ -45,6 +47,24 @@ test("parses asynchronous submission instructions", () => {
   assert.throws(
     () => parseImageSubmission({ ...INPUT, style: "unsupported" }),
     (error) => error instanceof ImageSubmissionError && error.status === 400,
+  );
+});
+
+test("rejects image admission above the configured upload limit", () => {
+  assert.throws(
+    () =>
+      parseImageSubmission({
+        ...INPUT,
+        contentLength: 10 * 1024 * 1024 + 1,
+      }),
+    (error) => error instanceof ImageSubmissionError && error.status === 413,
+  );
+});
+
+test("rejects an oversized submit request before it is parsed", () => {
+  assert.throws(
+    () => validateSubmissionRequestContentLength(String(10 * 1024 * 1024 + 1)),
+    (error) => error instanceof ImageSubmissionError && error.status === 413,
   );
 });
 

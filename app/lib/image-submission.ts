@@ -12,6 +12,7 @@ import {
   usageOwner,
   type UsageIdentity,
 } from "./usage";
+import { getMaxSourceImageBytes } from "./s3";
 
 export type ImageSubmissionInput = ImageJobAdmissionInput;
 
@@ -44,6 +45,31 @@ export function parseImageSubmission(payload: unknown): ImageSubmissionInput {
     return parseImageJobAdmission(payload);
   } catch (error) {
     throw toSubmissionError(error);
+  }
+}
+
+export function validateSubmissionRequestContentLength(
+  contentLength: string | null,
+) {
+  if (contentLength === null) {
+    return;
+  }
+
+  if (!/^\d+$/.test(contentLength)) {
+    throw new ImageSubmissionError("Request content length is invalid.", 400);
+  }
+
+  const byteLength = Number(contentLength);
+
+  if (!Number.isSafeInteger(byteLength)) {
+    throw new ImageSubmissionError("Request content length is invalid.", 400);
+  }
+
+  if (byteLength > getMaxSourceImageBytes()) {
+    throw new ImageSubmissionError(
+      `Request body must be ${Math.floor(getMaxSourceImageBytes() / (1024 * 1024))} MB or smaller.`,
+      413,
+    );
   }
 }
 

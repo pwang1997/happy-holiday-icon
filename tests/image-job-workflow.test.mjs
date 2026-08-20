@@ -86,6 +86,10 @@ test("admits a job, uploads its source, and polls without waiting for generation
   assert.equal(uploadRequest.init.body.get("key"), `uploads/${JOB_ID}/source.png`);
   assert.equal(uploadRequest.init.body.get("Content-Type"), "image/png");
   assert.equal(uploadRequest.init.body.get("file"), formData.get("image"));
+  assert.equal(
+    JSON.parse(requests[0].init?.body).contentLength,
+    formData.get("image").size,
+  );
 });
 
 test("surfaces an API error when job admission fails", async () => {

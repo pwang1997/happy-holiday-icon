@@ -10,6 +10,7 @@ import type {
 } from "./image-job-contract";
 import {
   getImageDownloadUrlIfExists,
+  getMaxSourceImageBytes,
   getTemporaryImageUploadPost,
 } from "./s3";
 import { STYLE_INSTRUCTIONS, type Style } from "./instructions";
@@ -36,6 +37,7 @@ export class ImageJobServiceError extends Error {
 
 export type ImageJobAdmissionInput = {
   contentType: string;
+  contentLength: number;
   prompt: string;
   style: Style;
 };
@@ -49,7 +51,7 @@ export function parseImageJobAdmission(payload: unknown): ImageJobAdmissionInput
     throw new ImageJobServiceError("Request body must be JSON.", 400);
   }
 
-  const { contentType, prompt: promptValue, style } = payload as Record<
+  const { contentLength, contentType, prompt: promptValue, style } = payload as Record<
     string,
     unknown
   >;
@@ -58,6 +60,24 @@ export function parseImageJobAdmission(payload: unknown): ImageJobAdmissionInput
     throw new ImageJobServiceError(
       "Only PNG, JPG, and WEBP images are supported.",
       415,
+    );
+  }
+
+  if (
+    typeof contentLength !== "number" ||
+    !Number.isSafeInteger(contentLength) ||
+    contentLength <= 0
+  ) {
+    throw new ImageJobServiceError(
+      "The source image size must be a positive whole number of bytes.",
+      400,
+    );
+  }
+
+  if (contentLength > getMaxSourceImageBytes()) {
+    throw new ImageJobServiceError(
+      `The source image must be ${Math.floor(getMaxSourceImageBytes() / (1024 * 1024))} MB or smaller.`,
+      413,
     );
   }
 
@@ -84,7 +104,7 @@ export function parseImageJobAdmission(payload: unknown): ImageJobAdmissionInput
     throw new ImageJobServiceError("Please choose a supported style.", 400);
   }
 
-  return { contentType, prompt, style: style as Style };
+  return { contentLength, contentType, prompt, style: style as Style };
 }
 
 function derivativeSize(key: string) {

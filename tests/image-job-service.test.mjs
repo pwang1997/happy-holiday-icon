@@ -47,11 +47,13 @@ test("validates image-job admission input", () => {
   assert.deepEqual(
     parseImageJobAdmission({
       contentType: "image/png",
+      contentLength: 1024,
       prompt: " A cheerful snowman ",
       style: "playful",
     }),
     {
       contentType: "image/png",
+      contentLength: 1024,
       prompt: "A cheerful snowman",
       style: "playful",
     },
@@ -60,8 +62,9 @@ test("validates image-job admission input", () => {
   assert.throws(
     () =>
       parseImageJobAdmission({
-        contentType: "image/gif",
-        prompt: "A cheerful snowman",
+      contentType: "image/gif",
+      contentLength: 1024,
+      prompt: "A cheerful snowman",
         style: "playful",
       }),
     (error) => error instanceof ImageJobServiceError && error.status === 415,
@@ -70,8 +73,9 @@ test("validates image-job admission input", () => {
   assert.throws(
     () =>
       parseImageJobAdmission({
-        contentType: "image/png",
-        prompt: "",
+      contentType: "image/png",
+      contentLength: 1024,
+      prompt: "",
         style: "playful",
       }),
     (error) => error instanceof ImageJobServiceError && error.status === 400,
@@ -81,6 +85,7 @@ test("validates image-job admission input", () => {
 test("creates an upload job with a size-limited presigned POST", async () => {
   const result = await createService().createImageUploadJob({
     contentType: "image/png",
+    contentLength: 1024,
     prompt: "A cheerful snowman",
     style: "playful",
     owner: { ownerId: "ANONYMOUS#hash", ownerType: "anonymous" },
