@@ -110,6 +110,11 @@ function valueAsString(item, name) {
   return typeof value === "string" ? value : null;
 }
 
+function valueAsNumber(item, name) {
+  const value = Number(item?.[name]?.N);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
 function isConditionalCheckFailed(error) {
   return error instanceof Error && error.name === "ConditionalCheckFailedException";
 }
@@ -236,8 +241,11 @@ async function getJob(jobId) {
   }
 
   return {
+    generationAttempt: valueAsNumber(item, "generation_attempt") ?? 0,
+    generationRetryAt: valueAsNumber(item, "generation_retry_at"),
     status: valueAsString(item, "status"),
     sourceKey: valueAsString(item, "source_key"),
+    sourceVersionId: valueAsString(item, "source_version_id"),
     prompt: valueAsString(item, "prompt"),
     style: valueAsString(item, "style"),
   };
@@ -248,6 +256,7 @@ async function updateJob(jobId, { status, error }, expectedStatus) {
     "#expectedStatus": "status",
     "#status": "status",
     "#updatedAt": "updated_at",
+    "#generationRetryAt": "generation_retry_at",
   };
   const values = {
     ":expectedStatus": { S: expectedStatus },
@@ -255,6 +264,7 @@ async function updateJob(jobId, { status, error }, expectedStatus) {
     ":updatedAt": { N: String(nowInSeconds()) },
   };
   const assignments = ["#status = :status", "#updatedAt = :updatedAt"];
+  const removals = status === "GENERATING" ? [] : ["#generationRetryAt"];
 
   if (error !== undefined) {
     names["#error"] = "error";
@@ -267,9 +277,76 @@ async function updateJob(jobId, { status, error }, expectedStatus) {
       TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
       Key: { job_id: { S: jobId } },
       ConditionExpression: "attribute_exists(job_id) AND #expectedStatus = :expectedStatus",
-      UpdateExpression: `SET ${assignments.join(", ")}`,
+      UpdateExpression: [
+        `SET ${assignments.join(", ")}`,
+        removals.length > 0 ? `REMOVE ${removals.join(", ")}` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
       ExpressionAttributeNames: names,
       ExpressionAttributeValues: values,
+    }),
+  );
+}
+
+async function claimInitialGeneration(jobId, sourceVersionId) {
+  const now = nowInSeconds();
+  const retryAt = now + requiredPositiveIntegerEnvironment("GENERATION_LEASE_SECONDS");
+
+  await dynamodb.send(
+    new UpdateItemCommand({
+      TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
+      Key: { job_id: { S: jobId } },
+      ConditionExpression: "attribute_exists(job_id) AND #status = :uploading",
+      UpdateExpression:
+        "SET #status = :generating, #generationAttempt = :attempt, #generationRetryAt = :retryAt, #sourceVersionId = :sourceVersionId, #updatedAt = :now, #error = :null",
+      ExpressionAttributeNames: {
+        "#error": "error",
+        "#generationAttempt": "generation_attempt",
+        "#generationRetryAt": "generation_retry_at",
+        "#sourceVersionId": "source_version_id",
+        "#status": "status",
+        "#updatedAt": "updated_at",
+      },
+      ExpressionAttributeValues: {
+        ":attempt": { N: "1" },
+        ":generating": { S: "GENERATING" },
+        ":null": { NULL: true },
+        ":now": { N: String(now) },
+        ":retryAt": { N: String(retryAt) },
+        ":sourceVersionId": { S: sourceVersionId },
+        ":uploading": { S: "UPLOADING" },
+      },
+    }),
+  );
+}
+
+async function claimRetryGeneration(jobId, sourceVersionId, expectedAttempt) {
+  const previousAttempt = expectedAttempt - 1;
+
+  await dynamodb.send(
+    new UpdateItemCommand({
+      TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
+      Key: { job_id: { S: jobId } },
+      ConditionExpression:
+        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :previousAttempt AND #sourceVersionId = :sourceVersionId",
+      UpdateExpression:
+        "SET #generationAttempt = :expectedAttempt, #updatedAt = :now, #error = :null",
+      ExpressionAttributeNames: {
+        "#error": "error",
+        "#generationAttempt": "generation_attempt",
+        "#sourceVersionId": "source_version_id",
+        "#status": "status",
+        "#updatedAt": "updated_at",
+      },
+      ExpressionAttributeValues: {
+        ":expectedAttempt": { N: String(expectedAttempt) },
+        ":generating": { S: "GENERATING" },
+        ":null": { NULL: true },
+        ":now": { N: String(nowInSeconds()) },
+        ":previousAttempt": { N: String(previousAttempt) },
+        ":sourceVersionId": { S: sourceVersionId },
+      },
     }),
   );
 }
@@ -387,84 +464,13 @@ async function generateImage({ input, contentType, extension, prompt, style }) {
   return Buffer.from(imageBase64, "base64");
 }
 
-function s3RecordsFromSqsRecord(record) {
-  let event;
-
-  try {
-    event = JSON.parse(record.body);
-  } catch {
-    throw new Error("SQS message did not contain a valid S3 event");
-  }
-
-  return Array.isArray(event.Records) ? event.Records : [];
-}
-
-async function processS3Record(record) {
-  const sourceBucket = record.s3?.bucket?.name;
-  const encodedKey = record.s3?.object?.key;
-
-  if (!sourceBucket || !encodedKey) {
-    throw new Error("S3 event record does not contain a bucket and object key");
-  }
-
-  if (sourceBucket !== requiredEnvironment("SOURCE_BUCKET")) {
-    console.warn("Skipping source event from an unexpected bucket", { sourceBucket });
-    return { skipped: true, reason: "unexpected-source-bucket" };
-  }
-
-  const sourceKey = decodeS3Key(encodedKey);
-  const sourceDetails = sourceDetailsFromKey(sourceKey);
-
-  if (!sourceDetails) {
-    console.info("Skipping a non-job-scoped source upload", { sourceKey });
-    return { skipped: true, reason: "non-job-scoped-source" };
-  }
-
-  const job = await getJob(sourceDetails.jobId);
-
-  if (!job || job.sourceKey !== sourceKey || job.status !== "UPLOADING") {
-    console.info("Skipping a source event that is not an uploadable job", {
-      jobId: sourceDetails.jobId,
-      sourceKey,
-      status: job?.status,
-    });
-    return { skipped: true, reason: "job-not-uploadable" };
-  }
-
-  const sourceVersionId = record.s3?.object?.versionId;
-
-  if (typeof sourceVersionId !== "string" || sourceVersionId.length === 0) {
-    await markJobFailed(
-      sourceDetails.jobId,
-      new Error("Source upload event did not include an object version"),
-      "UPLOADING",
-    );
-    return { jobId: sourceDetails.jobId, status: "FAILED" };
-  }
-
-  if (!job.prompt || !job.style) {
-    await markJobFailed(
-      sourceDetails.jobId,
-      new Error("Image job is missing generation instructions"),
-      "UPLOADING",
-    );
-    return { jobId: sourceDetails.jobId, status: "FAILED" };
-  }
-
-  try {
-    await updateJob(
-      sourceDetails.jobId,
-      { status: "GENERATING", error: null },
-      "UPLOADING",
-    );
-  } catch (error) {
-    if (isConditionalCheckFailed(error)) {
-      return { skipped: true, reason: "job-already-claimed" };
-    }
-
-    throw error;
-  }
-
+async function generateClaimedImage({
+  job,
+  sourceBucket,
+  sourceDetails,
+  sourceKey,
+  sourceVersionId,
+}) {
   let failureStatus = "GENERATING";
 
   try {
@@ -521,12 +527,181 @@ async function processS3Record(record) {
   }
 }
 
+function queueWorkItemsFromSqsRecord(record) {
+  let message;
+
+  try {
+    message = JSON.parse(record.body);
+  } catch {
+    throw new Error("SQS message did not contain a valid JSON payload");
+  }
+
+  if (message?.type === "generation-retry") {
+    if (
+      typeof message.jobId !== "string" ||
+      typeof message.sourceBucket !== "string" ||
+      typeof message.sourceKey !== "string" ||
+      typeof message.sourceVersionId !== "string" ||
+      !Number.isSafeInteger(message.expectedAttempt)
+    ) {
+      throw new Error("SQS generation retry message is invalid");
+    }
+
+    return [{ ...message, kind: "retry" }];
+  }
+
+  if (!Array.isArray(message?.Records)) {
+    throw new Error("SQS message did not contain S3 event records");
+  }
+
+  return message.Records.map((s3Record) => ({ kind: "source", record: s3Record }));
+}
+
+async function processS3Record(record) {
+  const sourceBucket = record.s3?.bucket?.name;
+  const encodedKey = record.s3?.object?.key;
+
+  if (!sourceBucket || !encodedKey) {
+    throw new Error("S3 event record does not contain a bucket and object key");
+  }
+
+  if (sourceBucket !== requiredEnvironment("SOURCE_BUCKET")) {
+    console.warn("Skipping source event from an unexpected bucket", { sourceBucket });
+    return { skipped: true, reason: "unexpected-source-bucket" };
+  }
+
+  const sourceKey = decodeS3Key(encodedKey);
+  const sourceDetails = sourceDetailsFromKey(sourceKey);
+
+  if (!sourceDetails) {
+    console.info("Skipping a non-job-scoped source upload", { sourceKey });
+    return { skipped: true, reason: "non-job-scoped-source" };
+  }
+
+  const job = await getJob(sourceDetails.jobId);
+
+  if (!job || job.sourceKey !== sourceKey) {
+    console.info("Skipping a source event that is not an uploadable job", {
+      jobId: sourceDetails.jobId,
+      sourceKey,
+      status: job?.status,
+    });
+    return { skipped: true, reason: "job-not-uploadable" };
+  }
+
+  if (job.status !== "UPLOADING") {
+    return {
+      skipped: true,
+      reason: job.status === "GENERATING" ? "job-generation-in-progress" : "job-not-uploadable",
+    };
+  }
+
+  const sourceVersionId = record.s3?.object?.versionId;
+
+  if (typeof sourceVersionId !== "string" || sourceVersionId.length === 0) {
+    await markJobFailed(
+      sourceDetails.jobId,
+      new Error("Source upload event did not include an object version"),
+      "UPLOADING",
+    );
+    return { jobId: sourceDetails.jobId, status: "FAILED" };
+  }
+
+  if (!job.prompt || !job.style) {
+    await markJobFailed(
+      sourceDetails.jobId,
+      new Error("Image job is missing generation instructions"),
+      "UPLOADING",
+    );
+    return { jobId: sourceDetails.jobId, status: "FAILED" };
+  }
+
+  try {
+    await claimInitialGeneration(sourceDetails.jobId, sourceVersionId);
+  } catch (error) {
+    if (isConditionalCheckFailed(error)) {
+      return { skipped: true, reason: "job-already-claimed" };
+    }
+
+    throw error;
+  }
+
+  return generateClaimedImage({
+    job,
+    sourceBucket,
+    sourceDetails,
+    sourceKey,
+    sourceVersionId,
+  });
+}
+
+async function processGenerationRetry(message) {
+  const sourceDetails = sourceDetailsFromKey(message.sourceKey);
+
+  if (
+    !sourceDetails ||
+    sourceDetails.jobId !== message.jobId ||
+    message.sourceBucket !== requiredEnvironment("SOURCE_BUCKET") ||
+    message.expectedAttempt < 2 ||
+    message.expectedAttempt > requiredPositiveIntegerEnvironment("GENERATION_MAX_RETRIES") + 1
+  ) {
+    return { skipped: true, reason: "invalid-generation-retry" };
+  }
+
+  const job = await getJob(sourceDetails.jobId);
+
+  if (
+    !job ||
+    job.status !== "GENERATING" ||
+    job.sourceKey !== message.sourceKey ||
+    job.sourceVersionId !== message.sourceVersionId ||
+    job.generationAttempt !== message.expectedAttempt - 1
+  ) {
+    return { skipped: true, reason: "generation-retry-not-claimable" };
+  }
+
+  if (!job.prompt || !job.style) {
+    await markJobFailed(
+      sourceDetails.jobId,
+      new Error("Image job is missing generation instructions"),
+      "GENERATING",
+    );
+    return { jobId: sourceDetails.jobId, status: "FAILED" };
+  }
+
+  try {
+    await claimRetryGeneration(
+      sourceDetails.jobId,
+      message.sourceVersionId,
+      message.expectedAttempt,
+    );
+  } catch (error) {
+    if (isConditionalCheckFailed(error)) {
+      return { skipped: true, reason: "generation-retry-already-claimed" };
+    }
+
+    throw error;
+  }
+
+  return generateClaimedImage({
+    job,
+    sourceBucket: message.sourceBucket,
+    sourceDetails,
+    sourceKey: message.sourceKey,
+    sourceVersionId: message.sourceVersionId,
+  });
+}
+
 async function processSqsRecord(record) {
-  const records = s3RecordsFromSqsRecord(record);
+  const workItems = queueWorkItemsFromSqsRecord(record);
   const results = [];
 
-  for (const s3Record of records) {
-    results.push(await processS3Record(s3Record));
+  for (const workItem of workItems) {
+    results.push(
+      workItem.kind === "retry"
+        ? await processGenerationRetry(workItem)
+        : await processS3Record(workItem.record),
+    );
   }
 
   return results;
@@ -539,6 +714,8 @@ export async function handler(event) {
   requiredPositiveIntegerEnvironment("MAX_SOURCE_IMAGE_BYTES");
   requiredPositiveIntegerEnvironment("MAX_SOURCE_IMAGE_DIMENSION");
   requiredPositiveIntegerEnvironment("MAX_SOURCE_IMAGE_PIXELS");
+  requiredPositiveIntegerEnvironment("GENERATION_LEASE_SECONDS");
+  requiredPositiveIntegerEnvironment("GENERATION_MAX_RETRIES");
   requiredEnvironment("OPENAI_API_KEY_SECRET_ARN");
   requiredEnvironment("SOURCE_BUCKET");
 

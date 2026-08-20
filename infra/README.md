@@ -31,6 +31,16 @@ errors, dead-letter messages, and source-message age. Configure
 `image_generation_alarm_actions` with notification targets such as an SNS topic
 before production use.
 
+When the generator claims a job, it records a DynamoDB generation lease. A
+scheduled recovery Lambda queries expired `GENERATING` leases once per minute,
+then sends up to three retries through the SQS queue with exponential delays
+of 30, 60, and 120 seconds by default. If the final retry lease expires—such as
+after a Lambda timeout or OOM—the recovery Lambda conditionally sets the job to
+`FAILED`, so polling returns a terminal error instead of leaving the job stale.
+Tune `image_generation_max_retries`,
+`image_generation_retry_base_delay_seconds`, and
+`image_generation_lease_grace_seconds` together with the generator timeout.
+
 Terraform creates an empty Secrets Manager secret for the worker. After the
 first apply, set either a raw API key or a JSON value containing
 `OPENAI_API_KEY`; never put it in Terraform variables or state:

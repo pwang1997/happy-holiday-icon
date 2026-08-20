@@ -109,6 +109,39 @@ variable "image_generation_timeout_seconds" {
   }
 }
 
+variable "image_generation_lease_grace_seconds" {
+  type        = number
+  description = "Extra time after the generator timeout before a stale job can be recovered."
+  default     = 60
+
+  validation {
+    condition     = var.image_generation_lease_grace_seconds >= 30 && var.image_generation_lease_grace_seconds <= 900
+    error_message = "image_generation_lease_grace_seconds must be between 30 seconds and 15 minutes."
+  }
+}
+
+variable "image_generation_max_retries" {
+  type        = number
+  description = "Maximum generator retries after the initial attempt before an expired generation lease becomes FAILED."
+  default     = 3
+
+  validation {
+    condition     = var.image_generation_max_retries >= 1 && var.image_generation_max_retries <= 10
+    error_message = "image_generation_max_retries must be between 1 and 10."
+  }
+}
+
+variable "image_generation_retry_base_delay_seconds" {
+  type        = number
+  description = "Initial delay for a recovered generator attempt; later retries double it."
+  default     = 30
+
+  validation {
+    condition     = var.image_generation_retry_base_delay_seconds >= 1 && var.image_generation_retry_base_delay_seconds <= 900
+    error_message = "image_generation_retry_base_delay_seconds must be between 1 second and 15 minutes."
+  }
+}
+
 variable "image_generation_reserved_concurrency" {
   type        = number
   description = "Maximum concurrent image-generation Lambda executions and SQS consumers."

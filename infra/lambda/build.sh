@@ -13,7 +13,7 @@ build_package() {
   build_dir="$(mktemp -d "${TMPDIR:-/tmp}/happy-holiday-icon-${package_name}.XXXXXX")"
   trap 'rm -rf "$build_dir"' RETURN
 
-  cp "$source_dir/index.mjs" "$source_dir/package.json" "$source_dir/package-lock.json" "$build_dir/"
+  cp "$source_dir"/*.mjs "$script_dir/retry-policy.mjs" "$source_dir/package.json" "$source_dir/package-lock.json" "$build_dir/"
   (
     cd "$build_dir"
     npm ci \
@@ -30,3 +30,4 @@ build_package() {
 
 build_package "image-reshaper"
 build_package "image-generator"
+build_package "image-generation-recovery"

@@ -8,6 +8,31 @@ resource "aws_dynamodb_table" "image_jobs" {
     type = "S"
   }
 
+  attribute {
+    name = "status"
+    type = "S"
+  }
+
+  attribute {
+    name = "generation_retry_at"
+    type = "N"
+  }
+
+  global_secondary_index {
+    name            = "generation-recovery"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "status"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "generation_retry_at"
+      key_type       = "RANGE"
+    }
+  }
+
   ttl {
     attribute_name = "expires_at"
     enabled        = true

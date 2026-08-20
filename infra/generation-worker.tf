@@ -36,12 +36,13 @@ resource "aws_iam_role_policy" "image_generator" {
 
     Statement = [
       {
-        Sid    = "ConsumeSourceImageEvents"
+        Sid    = "ConsumeAndRetrySourceImageEvents"
         Effect = "Allow"
         Action = [
           "sqs:DeleteMessage",
           "sqs:GetQueueAttributes",
           "sqs:ReceiveMessage",
+          "sqs:SendMessage",
         ]
         Resource = aws_sqs_queue.image_generation.arn
       },
@@ -105,6 +106,8 @@ resource "aws_lambda_function" "image_generator" {
       DYNAMODB_JOBS_TABLE         = aws_dynamodb_table.image_jobs.name
       IMAGE_GENERATION_BACKGROUND = var.image_generation_background
       IMAGE_GENERATION_MODEL      = var.image_generation_model
+      GENERATION_LEASE_SECONDS    = var.image_generation_timeout_seconds + var.image_generation_lease_grace_seconds
+      GENERATION_MAX_RETRIES      = var.image_generation_max_retries
       MAX_SOURCE_IMAGE_BYTES      = var.max_source_image_bytes
       MAX_SOURCE_IMAGE_DIMENSION  = var.max_source_image_dimension
       MAX_SOURCE_IMAGE_PIXELS     = var.max_source_image_pixels

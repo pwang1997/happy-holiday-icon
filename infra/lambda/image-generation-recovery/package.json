@@ -1,0 +1,9 @@
+{
+  "name": "happy-holiday-icon-image-generation-recovery",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1107.0",
+    "@aws-sdk/client-sqs": "3.1106.0"
+  }
+}

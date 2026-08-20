@@ -25,10 +25,11 @@ flowchart LR
     FinalS3[Final S3 bucket]
     Jobs[(DynamoDB image jobs)]
     Usage[(DynamoDB usage)]
-  Queue[SQS image-generation queue]
-  Generator[Image-generator Lambda]
-  Reshaper[Image-reshaper Lambda and Sharp]
-  Secrets[Secrets Manager]
+    Queue[SQS image-generation queue]
+    Generator[Image-generator Lambda]
+    Recovery[Scheduled generation-recovery Lambda]
+    Reshaper[Image-reshaper Lambda and Sharp]
+    Secrets[Secrets Manager]
     Cognito[Amazon Cognito]
   end
 
@@ -38,6 +39,7 @@ flowchart LR
   HCP -. provisions .-> Usage
   HCP -. provisions .-> Queue
   HCP -. provisions .-> Generator
+  HCP -. provisions .-> Recovery
   HCP -. provisions .-> Reshaper
   HCP -. provisions .-> Secrets
   HCP -. provisions .-> Cognito
@@ -56,6 +58,9 @@ flowchart LR
   Generator -->|image edit request| OpenAI
   OpenAI -->|generated PNG| Generator
   Generator -->|write generated PNG; RESHAPING| TemporaryS3
+  Jobs -->|expired GENERATING lease| Recovery
+  Recovery -->|three delayed retries| Queue
+  Recovery -->|FAILED after final retry| Jobs
 
   TemporaryS3 -->|ObjectCreated under images| Reshaper
   Reshaper -->|read generated PNG| TemporaryS3

@@ -88,6 +88,11 @@ output "image_generator_function_arn" {
   value       = aws_lambda_function.image_generator.arn
 }
 
+output "image_generation_recovery_function_name" {
+  description = "Name of the scheduled Lambda function that recovers expired image-generation leases."
+  value       = aws_lambda_function.image_generation_recovery.function_name
+}
+
 output "image_generation_openai_secret_arn" {
   description = "Secrets Manager ARN where the image-generation worker reads OPENAI_API_KEY."
   value       = aws_secretsmanager_secret.openai_api_key.arn

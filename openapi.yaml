@@ -370,7 +370,7 @@ components:
             $ref: '#/components/schemas/ImageUrl'
         error:
           type: [string, 'null']
-          description: Failure reason when `status` is `FAILED`.
+          description: Failure reason when `status` is `FAILED`, including a generation lease that expires after all retry attempts.
         createdAt:
           type: integer
           format: int64
