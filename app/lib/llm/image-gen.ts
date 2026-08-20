@@ -1,5 +1,11 @@
-import { STYLE_INSTRUCTIONS, type Style } from "@/app/lib/instructions";
+import {
+  IMAGE_GENERATION_PROMPT,
+  STYLE_INSTRUCTIONS,
+  SYSTEM_PROMPT,
+  type Style,
+} from "@/app/lib/instructions";
 import { HumanMessage } from "@langchain/core/messages";
+import { ChatPromptTemplate, MessagesPlaceholder } from "@langchain/core/prompts";
 import { ChatOpenAI, tools } from "@langchain/openai";
 
 export type ImageGenerationRequest = {
@@ -26,33 +32,6 @@ export class ImageGenerationConfigurationError extends Error {
     );
     this.name = "ImageGenerationConfigurationError";
   }
-}
-
-function generatedImageFromResponse(response: {
-  additional_kwargs?: Record<string, unknown>;
-}): GeneratedImage {
-  const toolOutputs = response.additional_kwargs?.tool_outputs;
-  const imageOutput = Array.isArray(toolOutputs)
-    ? toolOutputs.find(
-        (output): output is ImageGenerationOutput =>
-          typeof output === "object" &&
-          output !== null &&
-          "type" in output &&
-          output.type === "image_generation_call",
-      )
-    : undefined;
-
-  if (!imageOutput?.result) {
-    throw new Error("The image generator did not return an image.");
-  }
-
-  return {
-    imageBase64: imageOutput.result,
-    revisedPrompt:
-      typeof imageOutput.revised_prompt === "string"
-        ? imageOutput.revised_prompt
-        : null,
-  };
 }
 
 export default class ImageGenProvider {
@@ -85,31 +64,62 @@ export default class ImageGenProvider {
       "Return the finished icon as a PNG with a transparent background when possible.",
     ].join("\n");
 
-    const response = await this.model.invoke(
-      [
-        new HumanMessage({
-          content: [
-            { type: "text", text: instruction },
-            { type: "image_url", image_url: { url: imageDataUrl } },
+    const imageGenerationPrompt = ChatPromptTemplate.fromMessages([
+      ["system", SYSTEM_PROMPT],
+      ["human", IMAGE_GENERATION_PROMPT],
+      new MessagesPlaceholder("referenceImage"),
+    ]);
+
+    const response = await imageGenerationPrompt
+      .pipe(
+        this.model.bindTools(
+          [
+            tools.imageGeneration({
+              action: "edit",
+              background: "transparent",
+              inputFidelity: "high",
+              model: "gpt-image-1",
+              outputFormat: "png",
+              quality: "medium",
+              size: "1024x1024",
+            }),
           ],
-        }),
-      ],
-      {
-        tools: [
-          tools.imageGeneration({
-            action: "edit",
-            background: "transparent",
-            inputFidelity: "high",
-            model: "gpt-image-1",
-            outputFormat: "png",
-            quality: "medium",
-            size: "1024x1024",
+          { tool_choice: { type: "image_generation" } },
+        ),
+      )
+      .withConfig({ runName: "holidayIconImageGeneration" })
+      .invoke({
+        userPrompt: instruction,
+        referenceImage: [
+          new HumanMessage({
+            content: [
+              { type: "image_url", image_url: { url: imageDataUrl } },
+            ],
           }),
         ],
-        tool_choice: { type: "image_generation" },
-      },
-    );
+      });
 
-    return generatedImageFromResponse(response);
+    const toolOutputs = response.additional_kwargs?.tool_outputs;
+    const imageOutput = Array.isArray(toolOutputs)
+      ? toolOutputs.find(
+          (output): output is ImageGenerationOutput =>
+            typeof output === "object" &&
+            output !== null &&
+            "type" in output &&
+            output.type === "image_generation_call",
+        )
+      : undefined;
+
+    if (!imageOutput?.result) {
+      throw new Error("The image generator did not return an image.");
+    }
+
+    return {
+      imageBase64: imageOutput.result,
+      revisedPrompt:
+        typeof imageOutput.revised_prompt === "string"
+          ? imageOutput.revised_prompt
+          : null,
+    };
   }
 }
