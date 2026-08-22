@@ -1,4 +1,12 @@
-# Happy Holiday Icon ![Happy Holiday Icon](app/happy-holiday-icon.ico)
+# Happy Holiday Icon ![Happy Holiday Icon](app/favicon.ico)
+
+<p>
+  <a href="https://nextjs.org/"><img alt="Next.js" src="https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&amp;logoColor=white" /></a>
+  <a href="https://www.langchain.com/"><img alt="LangChain" src="https://img.shields.io/badge/LangChain-1C3C3C?logo=langchain&amp;logoColor=white" /></a>
+  <a href="https://www.terraform.io/"><img alt="Terraform" src="https://img.shields.io/badge/Terraform-7B42BC?logo=terraform&amp;logoColor=white" /></a>
+  <a href="https://aws.amazon.com/"><img alt="AWS" src="https://img.shields.io/badge/AWS-232F3E?logo=amazonwebservices&amp;logoColor=FF9900" /></a>
+  <a href="https://github.com/pwang1997/happy-holiday-icon/actions/workflows/ci.yml"><img alt="CI test coverage status" src="https://github.com/pwang1997/happy-holiday-icon/actions/workflows/ci.yml/badge.svg?branch=main" /></a>
+</p>
 
 Happy Holiday Icon turns an uploaded PNG, JPEG, or WebP image into a holiday vibed icon, then produces optimized WebP derivatives at 32px, 48px, and 512px. 
 
@@ -46,7 +54,7 @@ flowchart LR
 
   Browser -->|POST /api/submit| Next
   Next <-->|PKCE sign-in and access token| Cognito
-  Next -->|reserve usage| Usage
+  Next -->|record usage| Usage
   Next -->|create UPLOADING job| Jobs
   Next -->|bounded presigned POST form| Browser
   Browser -->|POST source image| TemporaryS3
@@ -75,7 +83,7 @@ flowchart LR
 
 ## API contract
 
-[`openapi.yaml`](openapi.yaml) documents the six App Router endpoints for **job admission**, **polling**, and **Cognito auth**. It includes request schemas, response states, error cases, optional bearer or cookie authentication, and the bounded presigned S3 POST upload handoff.
+[`openapi.yaml`](openapi.yaml) documents the six App Router endpoints for **job admission**, **polling**, and **Cognito auth**. Before admitting a job, `POST /api/submit` validates the request, authenticates the caller, and rejects attempts to override the image-generation instructions. It then creates the job, records usage, and returns the bounded presigned S3 POST upload handoff.
 
 ## Provision infrastructure
 
@@ -90,3 +98,7 @@ terraform -chdir=infra apply
 ```
 
 Configure the Next.js runtime from the `app_environment` Terraform output. Attach `image_upload_policy_arn`, `image_jobs_policy_arn`, and `anonymous_usage_policy_arn` to its runtime identity. Terraform configures the Lambda execution role, S3 notification, and Lambda access automatically.
+
+## Test coverage
+
+`pnpm test:coverage` prints Node's line, branch, and function coverage summary. GitHub Actions saves the raw V8 profiles in `coverage/` and uploads them as the `test-coverage` artifact.

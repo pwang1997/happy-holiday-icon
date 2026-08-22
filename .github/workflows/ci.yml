@@ -26,6 +26,17 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test
+
+      - name: Run tests with coverage
+        run: NODE_V8_COVERAGE=coverage pnpm test:coverage
+
+      - name: Upload test coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-coverage
+          path: coverage
+          if-no-files-found: warn
+
       - run: pnpm lint
       - run: pnpm exec next build --webpack
