@@ -7,9 +7,11 @@ import {
   ImageSubmissionError,
   imageSubmissionService,
   parseImageSubmission,
-  type ImageSubmissionInput,
   validateSubmissionRequestContentLength,
+  type ImageSubmissionInput,
 } from "@/app/lib/image-submission";
+import { STYLE_INSTRUCTIONS, SYSTEM_PROMPT } from "@/app/lib/instructions";
+import PromptProtectProvider from "@/app/lib/llm/prompt-protect";
 import { setTrialSessionCookie } from "@/app/lib/trial-session-cookie";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -62,6 +64,28 @@ export async function POST(request: NextRequest) {
   }
 
   const { trialSession, usageIdentity } = submissionAuth;
+
+  const trustedBasePrompt = [
+    SYSTEM_PROMPT,
+    "Edit the uploaded reference image into a single holiday app icon.",
+    `The requested visual style is: ${STYLE_INSTRUCTIONS[input.style]}`,
+    "Keep the main subject recognizable, centered, and legible at small sizes.",
+    "Use a square composition, a clean silhouette, and no text or watermark.",
+    "Return a PNG with a transparent background when possible.",
+  ].join("\n");
+
+  try {
+    await new PromptProtectProvider().validate(trustedBasePrompt, input.prompt);
+  } catch (error) {
+    console.error("Unable to validate image submission prompt", error);
+    return setTrialSessionCookie(
+      errorResponse(
+        "Please describe the holiday icon you want without additional instructions.",
+        400,
+      ),
+      trialSession,
+    );
+  }
 
   try {
     const result = await imageSubmissionService.admitImageJob({
