@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  generationFailureDisposition,
   generationRetryClaim,
   generationRecoveryAction,
   generationRetryDelaySeconds,
   MAX_GENERATION_RETRIES,
+  RETRYABLE_GENERATION_FAILURE,
   reshapingRetryClaim,
+  TERMINAL_GENERATION_FAILURE,
+  terminalGenerationFailure,
 } from "../infra/lambda/retry-policy.mjs";
 
 test("uses three generation retries with exponential retry delays", () => {
@@ -17,6 +21,50 @@ test("uses three generation retries with exponential retry delays", () => {
 
 test("caps an SQS retry delay at its 15-minute maximum", () => {
   assert.equal(generationRetryDelaySeconds(8, 30), 900);
+});
+
+test("classifies transient OpenAI and S3 failures for recovery", () => {
+  for (const status of [408, 409, 425, 429, 500, 503]) {
+    assert.equal(
+      generationFailureDisposition({ status }),
+      RETRYABLE_GENERATION_FAILURE,
+    );
+  }
+
+  assert.equal(
+    generationFailureDisposition({ $metadata: { httpStatusCode: 503 } }),
+    RETRYABLE_GENERATION_FAILURE,
+  );
+  assert.equal(
+    generationFailureDisposition({ $retryable: { throttling: true } }),
+    RETRYABLE_GENERATION_FAILURE,
+  );
+  assert.equal(
+    generationFailureDisposition({ cause: { code: "ETIMEDOUT" } }),
+    RETRYABLE_GENERATION_FAILURE,
+  );
+  assert.equal(
+    generationFailureDisposition(new TypeError("fetch failed")),
+    RETRYABLE_GENERATION_FAILURE,
+  );
+});
+
+test("classifies malformed input and permanent provider rejections as terminal", () => {
+  for (const status of [400, 401, 403, 404, 422]) {
+    assert.equal(
+      generationFailureDisposition({ status }),
+      TERMINAL_GENERATION_FAILURE,
+    );
+  }
+
+  assert.equal(
+    generationFailureDisposition(terminalGenerationFailure("invalid source image")),
+    TERMINAL_GENERATION_FAILURE,
+  );
+  assert.equal(
+    generationFailureDisposition(new Error("missing image data")),
+    TERMINAL_GENERATION_FAILURE,
+  );
 });
 
 test("renews a retry lease from its actual claim time", () => {

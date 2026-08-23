@@ -10,7 +10,12 @@ import {
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager";
 import sharp from "sharp";
-import { generationRetryClaim } from "./retry-policy.mjs";
+import {
+  generationFailureDisposition,
+  generationRetryClaim,
+  RETRYABLE_GENERATION_FAILURE,
+  terminalGenerationFailure,
+} from "./retry-policy.mjs";
 
 const dynamodb = new DynamoDBClient({});
 const s3 = new S3Client({});
@@ -78,7 +83,7 @@ function sourceContentType(extension) {
     case "webp":
       return "image/webp";
     default:
-      throw new Error(`Unsupported source extension: ${extension}`);
+      throw terminalGenerationFailure(`Unsupported source extension: ${extension}`);
   }
 }
 
@@ -92,7 +97,7 @@ function sourceFormat(extension) {
     case "webp":
       return "webp";
     default:
-      throw new Error(`Unsupported source extension: ${extension}`);
+      throw terminalGenerationFailure(`Unsupported source extension: ${extension}`);
   }
 }
 
@@ -100,7 +105,7 @@ function styleInstruction(style) {
   const instruction = STYLE_INSTRUCTIONS[style];
 
   if (!instruction) {
-    throw new Error(`Unsupported image style: ${style}`);
+    throw terminalGenerationFailure(`Unsupported image style: ${style}`);
   }
 
   return instruction;
@@ -122,7 +127,7 @@ function isConditionalCheckFailed(error) {
 
 async function bodyToBuffer(body, maxBytes) {
   if (!body) {
-    throw new Error("S3 returned an empty source image");
+    throw terminalGenerationFailure("S3 returned an empty source image");
   }
 
   const chunks = [];
@@ -133,14 +138,16 @@ async function bodyToBuffer(body, maxBytes) {
     byteLength += bytes.length;
 
     if (byteLength > maxBytes) {
-      throw new Error(`Source image exceeds the ${maxBytes}-byte limit`);
+      throw terminalGenerationFailure(
+        `Source image exceeds the ${maxBytes}-byte limit`,
+      );
     }
 
     chunks.push(bytes);
   }
 
   if (byteLength === 0) {
-    throw new Error("S3 returned an empty source image");
+    throw terminalGenerationFailure("S3 returned an empty source image");
   }
 
   return Buffer.concat(chunks, byteLength);
@@ -167,15 +174,19 @@ async function getValidatedSourceImage({
   const contentLength = head.ContentLength;
 
   if (!Number.isSafeInteger(contentLength) || contentLength <= 0) {
-    throw new Error("Source image has an invalid content length");
+    throw terminalGenerationFailure("Source image has an invalid content length");
   }
 
   if (contentLength > maxBytes) {
-    throw new Error(`Source image exceeds the ${maxBytes}-byte limit`);
+    throw terminalGenerationFailure(
+      `Source image exceeds the ${maxBytes}-byte limit`,
+    );
   }
 
   if (head.ContentType !== expectedContentType) {
-    throw new Error(`Source image content type must be ${expectedContentType}`);
+    throw terminalGenerationFailure(
+      `Source image content type must be ${expectedContentType}`,
+    );
   }
 
   const source = await s3.send(
@@ -188,7 +199,9 @@ async function getValidatedSourceImage({
   const input = await bodyToBuffer(source.Body, maxBytes);
 
   if (input.length !== contentLength) {
-    throw new Error("Source image length did not match its object metadata");
+    throw terminalGenerationFailure(
+      "Source image length did not match its object metadata",
+    );
   }
 
   let metadata;
@@ -196,11 +209,15 @@ async function getValidatedSourceImage({
   try {
     metadata = await sharp(input, { limitInputPixels: maxPixels }).metadata();
   } catch {
-    throw new Error("Source image is not a readable PNG, JPG, or WEBP file");
+    throw terminalGenerationFailure(
+      "Source image is not a readable PNG, JPG, or WEBP file",
+    );
   }
 
   if (metadata.format !== expectedFormat) {
-    throw new Error(`Source image signature does not match .${extension}`);
+    throw terminalGenerationFailure(
+      `Source image signature does not match .${extension}`,
+    );
   }
 
   if (
@@ -209,11 +226,11 @@ async function getValidatedSourceImage({
     metadata.width <= 0 ||
     metadata.height <= 0
   ) {
-    throw new Error("Source image has invalid dimensions");
+    throw terminalGenerationFailure("Source image has invalid dimensions");
   }
 
   if (metadata.width > maxDimension || metadata.height > maxDimension) {
-    throw new Error(
+    throw terminalGenerationFailure(
       `Source image dimensions must not exceed ${maxDimension}px on either side`,
     );
   }
@@ -221,7 +238,9 @@ async function getValidatedSourceImage({
   const pixelCount = metadata.width * metadata.height;
 
   if (!Number.isSafeInteger(pixelCount) || pixelCount > maxPixels) {
-    throw new Error(`Source image exceeds the ${maxPixels}-pixel limit`);
+    throw terminalGenerationFailure(
+      `Source image exceeds the ${maxPixels}-pixel limit`,
+    );
   }
 
   return { input, contentType: expectedContentType };
@@ -252,7 +271,12 @@ async function getJob(jobId) {
   };
 }
 
-async function updateJob(jobId, { status, error }, expectedStatus) {
+async function updateJob(
+  jobId,
+  { status, error },
+  expectedStatus,
+  generationClaim,
+) {
   const names = {
     "#expectedStatus": "status",
     "#status": "status",
@@ -266,6 +290,24 @@ async function updateJob(jobId, { status, error }, expectedStatus) {
   };
   const assignments = ["#status = :status", "#updatedAt = :updatedAt"];
   const removals = status === "GENERATING" ? [] : ["#generationRetryAt"];
+  const conditions = [
+    "attribute_exists(job_id)",
+    "#expectedStatus = :expectedStatus",
+  ];
+
+  if (generationClaim) {
+    names["#generationAttempt"] = "generation_attempt";
+    values[":generationAttempt"] = {
+      N: String(generationClaim.generationAttempt),
+    };
+    values[":generationRetryAt"] = {
+      N: String(generationClaim.generationRetryAt),
+    };
+    conditions.push(
+      "#generationAttempt = :generationAttempt",
+      "#generationRetryAt = :generationRetryAt",
+    );
+  }
 
   if (error !== undefined) {
     names["#error"] = "error";
@@ -277,7 +319,7 @@ async function updateJob(jobId, { status, error }, expectedStatus) {
     new UpdateItemCommand({
       TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
       Key: { job_id: { S: jobId } },
-      ConditionExpression: "attribute_exists(job_id) AND #expectedStatus = :expectedStatus",
+      ConditionExpression: conditions.join(" AND "),
       UpdateExpression: [
         `SET ${assignments.join(", ")}`,
         removals.length > 0 ? `REMOVE ${removals.join(", ")}` : "",
@@ -288,6 +330,53 @@ async function updateJob(jobId, { status, error }, expectedStatus) {
       ExpressionAttributeValues: values,
     }),
   );
+}
+
+async function markGenerationRetryPending(jobId, error, generationClaim) {
+  const now = nowInSeconds();
+
+  try {
+    await dynamodb.send(
+      new UpdateItemCommand({
+        TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
+        Key: { job_id: { S: jobId } },
+        ConditionExpression:
+          "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :generationAttempt AND #generationRetryAt = :generationRetryAt",
+        UpdateExpression:
+          "SET #generationRetryAt = :now, #updatedAt = :now, #error = :error",
+        ExpressionAttributeNames: {
+          "#error": "error",
+          "#generationAttempt": "generation_attempt",
+          "#generationRetryAt": "generation_retry_at",
+          "#status": "status",
+          "#updatedAt": "updated_at",
+        },
+        ExpressionAttributeValues: {
+          ":error": {
+            S:
+              error instanceof Error
+                ? error.message.slice(0, 500)
+                : "Image generation needs a retry",
+          },
+          ":generating": { S: "GENERATING" },
+          ":generationAttempt": {
+            N: String(generationClaim.generationAttempt),
+          },
+          ":generationRetryAt": {
+            N: String(generationClaim.generationRetryAt),
+          },
+          ":now": { N: String(now) },
+        },
+      }),
+    );
+    return true;
+  } catch (updateError) {
+    if (isConditionalCheckFailed(updateError)) {
+      return false;
+    }
+
+    throw updateError;
+  }
 }
 
 async function claimInitialGeneration(jobId, sourceVersionId) {
@@ -377,7 +466,7 @@ async function claimRetryGeneration(
   };
 }
 
-async function markJobFailed(jobId, error, expectedStatus) {
+async function markJobFailed(jobId, error, expectedStatus, generationClaim) {
   try {
     await updateJob(
       jobId,
@@ -386,6 +475,7 @@ async function markJobFailed(jobId, error, expectedStatus) {
         error: error instanceof Error ? error.message : "Image generation failed",
       },
       expectedStatus,
+      generationClaim,
     );
     return true;
   } catch (updateError) {
@@ -410,7 +500,9 @@ async function getOpenAiApiKey() {
   const secretValue = result.SecretString?.trim();
 
   if (!secretValue) {
-    throw new Error("The OpenAI API key secret does not contain a string value");
+    throw terminalGenerationFailure(
+      "The OpenAI API key secret does not contain a string value",
+    );
   }
 
   try {
@@ -493,13 +585,19 @@ async function generateImage({ input, contentType, extension, prompt, style }) {
       typeof payload?.error?.message === "string"
         ? `: ${payload.error.message.slice(0, 500)}`
         : "";
-    throw new Error(`OpenAI image edit failed with ${response.status}${detail}`);
+    const error = new Error(
+      `OpenAI image edit failed with ${response.status}${detail}`,
+    );
+    error.status = response.status;
+    throw error;
   }
 
   const imageBase64 = payload?.data?.[0]?.b64_json;
 
   if (typeof imageBase64 !== "string" || imageBase64.length === 0) {
-    throw new Error("OpenAI image edit did not return image data");
+    throw terminalGenerationFailure(
+      "OpenAI image edit did not return image data",
+    );
   }
 
   return Buffer.from(imageBase64, "base64");
@@ -552,12 +650,35 @@ async function generateClaimedImage({
       status: "GENERATED",
     };
   } catch (error) {
-    const failed = await markJobFailed(sourceDetails.jobId, error, "GENERATING");
+    if (generationFailureDisposition(error) === RETRYABLE_GENERATION_FAILURE) {
+      const retryPending = await markGenerationRetryPending(
+        sourceDetails.jobId,
+        error,
+        generationClaim,
+      );
+
+      if (!retryPending) {
+        console.info("Image job lease changed before the worker could retry it", {
+          jobId: sourceDetails.jobId,
+        });
+        return { jobId: sourceDetails.jobId, skipped: true, reason: "job-not-generating" };
+      }
+
+      return { jobId: sourceDetails.jobId, status: "RETRY_PENDING" };
+    }
+
+    const failed = await markJobFailed(
+      sourceDetails.jobId,
+      error,
+      "GENERATING",
+      generationClaim,
+    );
 
     if (!failed) {
       console.info("Image job reached a terminal state before the worker could fail it", {
         jobId: sourceDetails.jobId,
       });
+      return { jobId: sourceDetails.jobId, skipped: true, reason: "job-not-generating" };
     }
 
     return { jobId: sourceDetails.jobId, status: "FAILED" };
