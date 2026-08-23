@@ -12,6 +12,44 @@ export function generationRetryDelaySeconds(completedAttempts, baseDelaySeconds)
   return Math.min(900, baseDelaySeconds * 2 ** (completedAttempts - 1));
 }
 
+export function generationRetryClaim(
+  expectedAttempt,
+  expectedGenerationRetryAt,
+  now,
+  leaseSeconds,
+) {
+  if (!Number.isSafeInteger(expectedAttempt) || expectedAttempt < 2) {
+    throw new Error("expectedAttempt must be an integer greater than one");
+  }
+
+  if (
+    !Number.isSafeInteger(expectedGenerationRetryAt) ||
+    expectedGenerationRetryAt <= 0
+  ) {
+    throw new Error("expectedGenerationRetryAt must be a positive integer");
+  }
+
+  if (!Number.isSafeInteger(now) || now < 0) {
+    throw new Error("now must be a non-negative integer");
+  }
+
+  if (!Number.isSafeInteger(leaseSeconds) || leaseSeconds <= 0) {
+    throw new Error("leaseSeconds must be a positive integer");
+  }
+
+  const renewedGenerationRetryAt = now + leaseSeconds;
+
+  if (!Number.isSafeInteger(renewedGenerationRetryAt)) {
+    throw new Error("renewed generation retry time must be a safe integer");
+  }
+
+  return {
+    expectedGenerationRetryAt,
+    previousAttempt: expectedAttempt - 1,
+    renewedGenerationRetryAt,
+  };
+}
+
 export function generationRecoveryAction(
   completedAttempts,
   maxRetries,

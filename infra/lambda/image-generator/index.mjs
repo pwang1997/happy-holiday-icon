@@ -10,6 +10,7 @@ import {
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager";
 import sharp from "sharp";
+import { generationRetryClaim } from "./retry-policy.mjs";
 
 const dynamodb = new DynamoDBClient({});
 const s3 = new S3Client({});
@@ -321,30 +322,48 @@ async function claimInitialGeneration(jobId, sourceVersionId) {
   );
 }
 
-async function claimRetryGeneration(jobId, sourceVersionId, expectedAttempt) {
-  const previousAttempt = expectedAttempt - 1;
+async function claimRetryGeneration(
+  jobId,
+  sourceVersionId,
+  expectedAttempt,
+  expectedGenerationRetryAt,
+) {
+  const now = nowInSeconds();
+  const claim = generationRetryClaim(
+    expectedAttempt,
+    expectedGenerationRetryAt,
+    now,
+    requiredPositiveIntegerEnvironment("GENERATION_LEASE_SECONDS"),
+  );
 
   await dynamodb.send(
     new UpdateItemCommand({
       TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
       Key: { job_id: { S: jobId } },
       ConditionExpression:
-        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :previousAttempt AND #sourceVersionId = :sourceVersionId",
+        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :previousAttempt AND #generationRetryAt = :expectedGenerationRetryAt AND #sourceVersionId = :sourceVersionId",
       UpdateExpression:
-        "SET #generationAttempt = :expectedAttempt, #updatedAt = :now, #error = :null",
+        "SET #generationAttempt = :expectedAttempt, #generationRetryAt = :renewedGenerationRetryAt, #updatedAt = :now, #error = :null",
       ExpressionAttributeNames: {
         "#error": "error",
         "#generationAttempt": "generation_attempt",
+        "#generationRetryAt": "generation_retry_at",
         "#sourceVersionId": "source_version_id",
         "#status": "status",
         "#updatedAt": "updated_at",
       },
       ExpressionAttributeValues: {
         ":expectedAttempt": { N: String(expectedAttempt) },
+        ":expectedGenerationRetryAt": {
+          N: String(claim.expectedGenerationRetryAt),
+        },
         ":generating": { S: "GENERATING" },
         ":null": { NULL: true },
-        ":now": { N: String(nowInSeconds()) },
-        ":previousAttempt": { N: String(previousAttempt) },
+        ":now": { N: String(now) },
+        ":previousAttempt": { N: String(claim.previousAttempt) },
+        ":renewedGenerationRetryAt": {
+          N: String(claim.renewedGenerationRetryAt),
+        },
         ":sourceVersionId": { S: sourceVersionId },
       },
     }),
@@ -557,7 +576,9 @@ function queueWorkItemsFromSqsRecord(record) {
       typeof message.sourceBucket !== "string" ||
       typeof message.sourceKey !== "string" ||
       typeof message.sourceVersionId !== "string" ||
-      !Number.isSafeInteger(message.expectedAttempt)
+      !Number.isSafeInteger(message.expectedAttempt) ||
+      !Number.isSafeInteger(message.expectedGenerationRetryAt) ||
+      message.expectedGenerationRetryAt <= 0
     ) {
       throw new Error("SQS generation retry message is invalid");
     }
@@ -670,7 +691,8 @@ async function processGenerationRetry(message) {
     job.status !== "GENERATING" ||
     job.sourceKey !== message.sourceKey ||
     job.sourceVersionId !== message.sourceVersionId ||
-    job.generationAttempt !== message.expectedAttempt - 1
+    job.generationAttempt !== message.expectedAttempt - 1 ||
+    job.generationRetryAt !== message.expectedGenerationRetryAt
   ) {
     return { skipped: true, reason: "generation-retry-not-claimable" };
   }
@@ -689,6 +711,7 @@ async function processGenerationRetry(message) {
       sourceDetails.jobId,
       message.sourceVersionId,
       message.expectedAttempt,
+      message.expectedGenerationRetryAt,
     );
   } catch (error) {
     if (isConditionalCheckFailed(error)) {

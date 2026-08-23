@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  generationRetryClaim,
   generationRecoveryAction,
   generationRetryDelaySeconds,
   MAX_GENERATION_RETRIES,
@@ -15,6 +16,21 @@ test("uses three generation retries with exponential retry delays", () => {
 
 test("caps an SQS retry delay at its 15-minute maximum", () => {
   assert.equal(generationRetryDelaySeconds(8, 30), 900);
+});
+
+test("renews a retry lease from its actual claim time", () => {
+  assert.deepEqual(generationRetryClaim(2, 1_090, 1_400, 960), {
+    expectedGenerationRetryAt: 1_090,
+    previousAttempt: 1,
+    renewedGenerationRetryAt: 2_360,
+  });
+});
+
+test("requires a retry claim to identify the exact scheduled lease", () => {
+  assert.throws(
+    () => generationRetryClaim(2, 0, 1_400, 960),
+    /expectedGenerationRetryAt must be a positive integer/,
+  );
 });
 
 test("stops recovery after the configured retry limit", () => {

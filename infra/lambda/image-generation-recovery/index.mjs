@@ -112,6 +112,7 @@ async function scheduleRetry(job, now, delaySeconds) {
       DelaySeconds: delaySeconds,
       MessageBody: JSON.stringify({
         expectedAttempt: job.generationAttempt + 1,
+        expectedGenerationRetryAt: nextRetryAt,
         jobId: job.jobId,
         sourceBucket: job.sourceBucket,
         sourceKey: job.sourceKey,
