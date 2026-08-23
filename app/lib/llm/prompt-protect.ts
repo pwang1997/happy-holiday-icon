@@ -6,9 +6,8 @@ const PROMPT_VALIDATION_TIMEOUT_MS = 5_000;
 
 export const PROMPT_VALIDATION_MODEL_CONFIG = {
   maxRetries: 0,
-  maxTokens: 4,
+  maxTokens: 100,
   model: "gpt-5.6-luna",
-  temperature: 0,
   timeout: PROMPT_VALIDATION_TIMEOUT_MS,
 } as const;
 
