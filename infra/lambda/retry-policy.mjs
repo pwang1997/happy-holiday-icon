@@ -75,6 +75,18 @@ export function generationFailureDisposition(error) {
   return TERMINAL_GENERATION_FAILURE;
 }
 
+export function isJobExpired(expiresAt, now) {
+  if (!Number.isSafeInteger(expiresAt)) {
+    throw new Error("expiresAt must be a safe integer");
+  }
+
+  if (!Number.isSafeInteger(now) || now < 0) {
+    throw new Error("now must be a non-negative integer");
+  }
+
+  return expiresAt <= now;
+}
+
 export function generationRetryDelaySeconds(completedAttempts, baseDelaySeconds) {
   if (!Number.isSafeInteger(completedAttempts) || completedAttempts < 1) {
     throw new Error("completedAttempts must be a positive integer");

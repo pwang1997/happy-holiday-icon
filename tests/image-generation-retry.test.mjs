@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   generationFailureDisposition,
+  isJobExpired,
   generationRetryClaim,
   generationRecoveryAction,
   generationRetryDelaySeconds,
@@ -11,6 +12,15 @@ import {
   TERMINAL_GENERATION_FAILURE,
   terminalGenerationFailure,
 } from "../infra/lambda/retry-policy.mjs";
+
+test("treats an expiry at the current second as terminal", () => {
+  assert.equal(isJobExpired(1_000, 1_000), true);
+  assert.equal(isJobExpired(999, 1_000), true);
+});
+
+test("permits a job that has not yet expired", () => {
+  assert.equal(isJobExpired(1_001, 1_000), false);
+});
 
 test("uses three generation retries with exponential retry delays", () => {
   assert.equal(MAX_GENERATION_RETRIES, 3);

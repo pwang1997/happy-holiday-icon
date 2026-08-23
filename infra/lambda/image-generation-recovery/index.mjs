@@ -7,6 +7,7 @@ import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
 import {
   generationRecoveryAction,
+  isJobExpired,
 } from "./retry-policy.mjs";
 
 const dynamodb = new DynamoDBClient({});
@@ -50,6 +51,7 @@ function valueAsNumber(item, name) {
 
 function expiredGenerationJob(item) {
   const job = {
+    expiresAt: valueAsNumber(item, "expires_at"),
     generationAttempt: valueAsNumber(item, "generation_attempt"),
     generationRetryAt: valueAsNumber(item, "generation_retry_at"),
     jobId: valueAsString(item, "job_id"),
@@ -84,6 +86,7 @@ async function getExpiredGenerationJobs(now) {
 
 function expiredReshapingJob(item) {
   const job = {
+    expiresAt: valueAsNumber(item, "expires_at"),
     generatedKey: valueAsString(item, "generated_key"),
     generatedVersionId: valueAsString(item, "generated_version_id"),
     jobId: valueAsString(item, "job_id"),
@@ -124,17 +127,19 @@ async function scheduleRetry(job, now, delaySeconds) {
       TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
       Key: { job_id: { S: job.jobId } },
       ConditionExpression:
-        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :attempt AND #generationRetryAt <= :now",
+        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :attempt AND #generationRetryAt = :generationRetryAt AND #expiresAt > :now",
       UpdateExpression: "SET #generationRetryAt = :nextRetryAt, #updatedAt = :now",
       ExpressionAttributeNames: {
         "#generationAttempt": "generation_attempt",
         "#generationRetryAt": "generation_retry_at",
+        "#expiresAt": "expires_at",
         "#status": "status",
         "#updatedAt": "updated_at",
       },
       ExpressionAttributeValues: {
         ":attempt": { N: String(job.generationAttempt) },
         ":generating": { S: "GENERATING" },
+        ":generationRetryAt": { N: String(job.generationRetryAt) },
         ":nextRetryAt": { N: String(nextRetryAt) },
         ":now": { N: String(now) },
       },
@@ -166,7 +171,7 @@ async function markJobFailed(job, now) {
       TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
       Key: { job_id: { S: job.jobId } },
       ConditionExpression:
-        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :attempt AND #generationRetryAt <= :now",
+        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :attempt AND #generationRetryAt = :generationRetryAt",
       UpdateExpression:
         "SET #status = :failed, #error = :error, #updatedAt = :now REMOVE #generationRetryAt",
       ExpressionAttributeNames: {
@@ -183,6 +188,38 @@ async function markJobFailed(job, now) {
         },
         ":failed": { S: "FAILED" },
         ":generating": { S: "GENERATING" },
+        ":generationRetryAt": { N: String(job.generationRetryAt) },
+        ":now": { N: String(now) },
+      },
+    }),
+  );
+
+  return { jobId: job.jobId, status: "FAILED" };
+}
+
+async function markExpiredGenerationJob(job, now) {
+  await dynamodb.send(
+    new UpdateItemCommand({
+      TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
+      Key: { job_id: { S: job.jobId } },
+      ConditionExpression:
+        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :attempt AND #generationRetryAt = :generationRetryAt AND #expiresAt <= :now",
+      UpdateExpression:
+        "SET #status = :failed, #error = :error, #updatedAt = :now REMOVE #generationRetryAt",
+      ExpressionAttributeNames: {
+        "#error": "error",
+        "#expiresAt": "expires_at",
+        "#generationAttempt": "generation_attempt",
+        "#generationRetryAt": "generation_retry_at",
+        "#status": "status",
+        "#updatedAt": "updated_at",
+      },
+      ExpressionAttributeValues: {
+        ":attempt": { N: String(job.generationAttempt) },
+        ":error": { S: "Image job expired before generation could be retried" },
+        ":failed": { S: "FAILED" },
+        ":generating": { S: "GENERATING" },
+        ":generationRetryAt": { N: String(job.generationRetryAt) },
         ":now": { N: String(now) },
       },
     }),
@@ -200,11 +237,12 @@ async function scheduleReshapingRetry(job, now, delaySeconds) {
       TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
       Key: { job_id: { S: job.jobId } },
       ConditionExpression:
-        "attribute_exists(job_id) AND #status = :reshaping AND #reshapingAttempt = :attempt AND #retryAt = :retryAt",
+        "attribute_exists(job_id) AND #status = :reshaping AND #reshapingAttempt = :attempt AND #retryAt = :retryAt AND #expiresAt > :now",
       UpdateExpression: "SET #retryAt = :nextRetryAt, #updatedAt = :now",
       ExpressionAttributeNames: {
         "#reshapingAttempt": "reshaping_attempt",
         "#retryAt": "generation_retry_at",
+        "#expiresAt": "expires_at",
         "#status": "status",
         "#updatedAt": "updated_at",
       },
@@ -270,12 +308,47 @@ async function markReshapingJobFailed(job, now) {
   return { jobId: job.jobId, status: "FAILED" };
 }
 
+async function markExpiredReshapingJob(job, now) {
+  await dynamodb.send(
+    new UpdateItemCommand({
+      TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
+      Key: { job_id: { S: job.jobId } },
+      ConditionExpression:
+        "attribute_exists(job_id) AND #status = :reshaping AND #reshapingAttempt = :attempt AND #retryAt = :retryAt AND #expiresAt <= :now",
+      UpdateExpression:
+        "SET #status = :failed, #error = :error, #updatedAt = :now REMOVE #retryAt",
+      ExpressionAttributeNames: {
+        "#error": "error",
+        "#expiresAt": "expires_at",
+        "#reshapingAttempt": "reshaping_attempt",
+        "#retryAt": "generation_retry_at",
+        "#status": "status",
+        "#updatedAt": "updated_at",
+      },
+      ExpressionAttributeValues: {
+        ":attempt": { N: String(job.reshapingAttempt) },
+        ":error": { S: "Image job expired before reshaping could be retried" },
+        ":failed": { S: "FAILED" },
+        ":now": { N: String(now) },
+        ":reshaping": { S: "RESHAPING" },
+        ":retryAt": { N: String(job.reshapingRetryAt) },
+      },
+    }),
+  );
+
+  return { jobId: job.jobId, status: "FAILED" };
+}
+
 function isConditionalCheckFailed(error) {
   return error instanceof Error && error.name === "ConditionalCheckFailedException";
 }
 
 async function recoverJob(job, now) {
   try {
+    if (isJobExpired(job.expiresAt, now)) {
+      return await markExpiredGenerationJob(job, now);
+    }
+
     const recovery = generationRecoveryAction(
       job.generationAttempt,
       requiredPositiveIntegerEnvironment("GENERATION_MAX_RETRIES"),
@@ -298,6 +371,10 @@ async function recoverJob(job, now) {
 
 async function recoverReshapingJob(job, now) {
   try {
+    if (isJobExpired(job.expiresAt, now)) {
+      return await markExpiredReshapingJob(job, now);
+    }
+
     const recovery = generationRecoveryAction(
       job.reshapingAttempt,
       requiredPositiveIntegerEnvironment("RESHAPING_MAX_RETRIES"),

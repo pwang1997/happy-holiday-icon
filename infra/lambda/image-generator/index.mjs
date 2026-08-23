@@ -13,6 +13,7 @@ import sharp from "sharp";
 import {
   generationFailureDisposition,
   generationRetryClaim,
+  isJobExpired,
   RETRYABLE_GENERATION_FAILURE,
   terminalGenerationFailure,
 } from "./retry-policy.mjs";
@@ -261,6 +262,7 @@ async function getJob(jobId) {
   }
 
   return {
+    expiresAt: valueAsNumber(item, "expires_at"),
     generationAttempt: valueAsNumber(item, "generation_attempt") ?? 0,
     generationRetryAt: valueAsNumber(item, "generation_retry_at"),
     status: valueAsString(item, "status"),
@@ -387,11 +389,13 @@ async function claimInitialGeneration(jobId, sourceVersionId) {
     new UpdateItemCommand({
       TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
       Key: { job_id: { S: jobId } },
-      ConditionExpression: "attribute_exists(job_id) AND #status = :uploading",
+      ConditionExpression:
+        "attribute_exists(job_id) AND #status = :uploading AND #expiresAt > :now",
       UpdateExpression:
         "SET #status = :generating, #generationAttempt = :attempt, #generationRetryAt = :retryAt, #sourceVersionId = :sourceVersionId, #updatedAt = :now, #error = :null",
       ExpressionAttributeNames: {
         "#error": "error",
+        "#expiresAt": "expires_at",
         "#generationAttempt": "generation_attempt",
         "#generationRetryAt": "generation_retry_at",
         "#sourceVersionId": "source_version_id",
@@ -432,11 +436,12 @@ async function claimRetryGeneration(
       TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
       Key: { job_id: { S: jobId } },
       ConditionExpression:
-        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :previousAttempt AND #generationRetryAt = :expectedGenerationRetryAt AND #sourceVersionId = :sourceVersionId",
+        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :previousAttempt AND #generationRetryAt = :expectedGenerationRetryAt AND #sourceVersionId = :sourceVersionId AND #expiresAt > :now",
       UpdateExpression:
         "SET #generationAttempt = :expectedAttempt, #generationRetryAt = :renewedGenerationRetryAt, #updatedAt = :now, #error = :null",
       ExpressionAttributeNames: {
         "#error": "error",
+        "#expiresAt": "expires_at",
         "#generationAttempt": "generation_attempt",
         "#generationRetryAt": "generation_retry_at",
         "#sourceVersionId": "source_version_id",
@@ -484,6 +489,63 @@ async function markJobFailed(jobId, error, expectedStatus, generationClaim) {
     }
 
     throw updateError;
+  }
+}
+
+async function markJobExpired(jobId, expectedStatus, generationClaim) {
+  const now = nowInSeconds();
+  const names = {
+    "#error": "error",
+    "#expiresAt": "expires_at",
+    "#generationRetryAt": "generation_retry_at",
+    "#status": "status",
+    "#updatedAt": "updated_at",
+  };
+  const values = {
+    ":error": { S: "Image job expired before generation could start" },
+    ":expectedStatus": { S: expectedStatus },
+    ":failed": { S: "FAILED" },
+    ":now": { N: String(now) },
+  };
+  const conditions = [
+    "attribute_exists(job_id)",
+    "#status = :expectedStatus",
+    "#expiresAt <= :now",
+  ];
+
+  if (generationClaim) {
+    names["#generationAttempt"] = "generation_attempt";
+    values[":generationAttempt"] = {
+      N: String(generationClaim.generationAttempt),
+    };
+    values[":generationRetryAt"] = {
+      N: String(generationClaim.generationRetryAt),
+    };
+    conditions.push(
+      "#generationAttempt = :generationAttempt",
+      "#generationRetryAt = :generationRetryAt",
+    );
+  }
+
+  try {
+    await dynamodb.send(
+      new UpdateItemCommand({
+        TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
+        Key: { job_id: { S: jobId } },
+        ConditionExpression: conditions.join(" AND "),
+        UpdateExpression:
+          "SET #status = :failed, #error = :error, #updatedAt = :now REMOVE #generationRetryAt",
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+      }),
+    );
+    return true;
+  } catch (error) {
+    if (isConditionalCheckFailed(error)) {
+      return false;
+    }
+
+    throw error;
   }
 }
 
@@ -611,6 +673,17 @@ async function generateClaimedImage({
   sourceKey,
   sourceVersionId,
 }) {
+  if (job.expiresAt !== null && isJobExpired(job.expiresAt, nowInSeconds())) {
+    const failed = await markJobExpired(
+      sourceDetails.jobId,
+      "GENERATING",
+      generationClaim,
+    );
+    return failed
+      ? { jobId: sourceDetails.jobId, status: "FAILED" }
+      : { jobId: sourceDetails.jobId, skipped: true, reason: "job-not-generating" };
+  }
+
   try {
     const source = await getValidatedSourceImage({
       bucket: sourceBucket,
@@ -621,6 +694,18 @@ async function generateClaimedImage({
       maxPixels: requiredPositiveIntegerEnvironment("MAX_SOURCE_IMAGE_PIXELS"),
       versionId: sourceVersionId,
     });
+
+    if (job.expiresAt !== null && isJobExpired(job.expiresAt, nowInSeconds())) {
+      const failed = await markJobExpired(
+        sourceDetails.jobId,
+        "GENERATING",
+        generationClaim,
+      );
+      return failed
+        ? { jobId: sourceDetails.jobId, status: "FAILED" }
+        : { jobId: sourceDetails.jobId, skipped: true, reason: "job-not-generating" };
+    }
+
     const output = await generateImage({
       input: source.input,
       contentType: source.contentType,
@@ -756,6 +841,13 @@ async function processS3Record(record) {
     };
   }
 
+  if (job.expiresAt !== null && isJobExpired(job.expiresAt, nowInSeconds())) {
+    const failed = await markJobExpired(sourceDetails.jobId, "UPLOADING");
+    return failed
+      ? { jobId: sourceDetails.jobId, status: "FAILED" }
+      : { skipped: true, reason: "job-not-uploadable" };
+  }
+
   const sourceVersionId = record.s3?.object?.versionId;
 
   if (typeof sourceVersionId !== "string" || sourceVersionId.length === 0) {
@@ -782,6 +874,11 @@ async function processS3Record(record) {
     generationClaim = await claimInitialGeneration(sourceDetails.jobId, sourceVersionId);
   } catch (error) {
     if (isConditionalCheckFailed(error)) {
+      const failed = await markJobExpired(sourceDetails.jobId, "UPLOADING");
+      if (failed) {
+        return { jobId: sourceDetails.jobId, status: "FAILED" };
+      }
+
       return { skipped: true, reason: "job-already-claimed" };
     }
 
@@ -824,6 +921,22 @@ async function processGenerationRetry(message) {
     return { skipped: true, reason: "generation-retry-not-claimable" };
   }
 
+  const priorGenerationClaim = {
+    generationAttempt: message.expectedAttempt - 1,
+    generationRetryAt: message.expectedGenerationRetryAt,
+  };
+
+  if (job.expiresAt !== null && isJobExpired(job.expiresAt, nowInSeconds())) {
+    const failed = await markJobExpired(
+      sourceDetails.jobId,
+      "GENERATING",
+      priorGenerationClaim,
+    );
+    return failed
+      ? { jobId: sourceDetails.jobId, status: "FAILED" }
+      : { skipped: true, reason: "generation-retry-not-claimable" };
+  }
+
   if (!job.prompt || !job.style) {
     await markJobFailed(
       sourceDetails.jobId,
@@ -844,6 +957,15 @@ async function processGenerationRetry(message) {
     );
   } catch (error) {
     if (isConditionalCheckFailed(error)) {
+      const failed = await markJobExpired(
+        sourceDetails.jobId,
+        "GENERATING",
+        priorGenerationClaim,
+      );
+      if (failed) {
+        return { jobId: sourceDetails.jobId, status: "FAILED" };
+      }
+
       return { skipped: true, reason: "generation-retry-already-claimed" };
     }
 
