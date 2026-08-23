@@ -33,7 +33,7 @@ resource "aws_iam_role_policy" "image_reshaper_s3" {
         Sid    = "ReadTemporaryImages"
         Effect = "Allow"
 
-        Action   = ["s3:GetObject"]
+        Action   = ["s3:GetObject", "s3:GetObjectVersion"]
         Resource = "${aws_s3_bucket.images.arn}/images/*"
       },
       {
