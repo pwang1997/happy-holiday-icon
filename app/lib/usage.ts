@@ -6,7 +6,6 @@ import {
   DynamoDBDocumentClient,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { createHash } from "node:crypto";
 
 export const MAX_FREE_TRIALS = 5;
 export const TRIAL_LIMIT_ERROR_CODE = "TRIAL_LIMIT_REACHED";
@@ -30,13 +29,8 @@ export function isTrialLimitError(error: unknown) {
 }
 
 export type UsageIdentity =
-  | { kind: "anonymous"; sessionToken: string }
+  | { kind: "anonymous"; visitorId: string }
   | { kind: "authenticated"; subject: string };
-
-export type UsageOwner = {
-  ownerId: string;
-  ownerType: UsageIdentity["kind"];
-};
 
 const USAGE_TTL_SECONDS = 365 * 24 * 60 * 60;
 let client: DynamoDBDocumentClient | undefined;
@@ -78,17 +72,7 @@ export function usageIdentityId(identity: UsageIdentity) {
     return `USER#${identity.subject}`;
   }
 
-  const digest = createHash("sha256")
-    .update(identity.sessionToken)
-    .digest("hex");
-  return `ANONYMOUS#${digest}`;
-}
-
-export function usageOwner(identity: UsageIdentity): UsageOwner {
-  return {
-    ownerId: usageIdentityId(identity),
-    ownerType: identity.kind,
-  };
+  return `ANONYMOUS#${identity.visitorId}`;
 }
 
 export async function recordUsage(identity: UsageIdentity) {

@@ -1,6 +1,8 @@
 import {
   getSubmissionAuth,
+  imageJobOwner,
   SubmissionAuthenticationError,
+  usageIdentityForSubmission,
 } from "@/app/lib/auth-service";
 import { errorResponse } from "@/app/lib/http-responses";
 import {
@@ -11,8 +13,17 @@ import {
   type ImageSubmissionInput,
 } from "@/app/lib/image-submission";
 import { STYLE_INSTRUCTIONS, SYSTEM_PROMPT } from "@/app/lib/instructions";
-import PromptProtectProvider from "@/app/lib/llm/prompt-protect";
+import PromptProtectProvider, {
+  PromptValidationRejectedError,
+  PromptValidationServiceError,
+} from "@/app/lib/llm/prompt-protect";
+import {
+  type SubmissionGuardLease,
+  SubmissionRateLimitError,
+  submissionGuard,
+} from "@/app/lib/submission-guard";
 import { setTrialSessionCookie } from "@/app/lib/trial-session-cookie";
+import type { UsageIdentity } from "@/app/lib/usage";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
@@ -63,7 +74,48 @@ export async function POST(request: NextRequest) {
     return errorResponse("Authentication is not configured.", 503);
   }
 
-  const { trialSession, usageIdentity } = submissionAuth;
+  const { identity, trialSession } = submissionAuth;
+  let usageIdentity: UsageIdentity;
+
+  try {
+    usageIdentity = usageIdentityForSubmission(request, identity);
+  } catch (error) {
+    if (error instanceof SubmissionAuthenticationError) {
+      return setTrialSessionCookie(
+        errorResponse(error.message, error.status),
+        trialSession,
+      );
+    }
+
+    console.error("Unable to establish submission usage identity", error);
+    return setTrialSessionCookie(
+      errorResponse("Submission protection is unavailable.", 503),
+      trialSession,
+    );
+  }
+
+  let validationLease: SubmissionGuardLease;
+
+  try {
+    validationLease = await submissionGuard.acquire(usageIdentity);
+  } catch (error) {
+    if (error instanceof SubmissionRateLimitError) {
+      return setTrialSessionCookie(
+        errorResponse(
+          "Too many submission attempts. Please try again shortly.",
+          429,
+          { "Retry-After": String(error.retryAfterSeconds) },
+        ),
+        trialSession,
+      );
+    }
+
+    console.error("Unable to enforce submission protection", error);
+    return setTrialSessionCookie(
+      errorResponse("Submission protection is unavailable.", 503),
+      trialSession,
+    );
+  }
 
   const trustedBasePrompt = [
     SYSTEM_PROMPT,
@@ -77,19 +129,41 @@ export async function POST(request: NextRequest) {
   try {
     await new PromptProtectProvider().validate(trustedBasePrompt, input.prompt);
   } catch (error) {
+    if (error instanceof PromptValidationRejectedError) {
+      return setTrialSessionCookie(
+        errorResponse(
+          "Please describe the holiday icon you want without additional instructions.",
+          400,
+        ),
+        trialSession,
+      );
+    }
+
+    if (error instanceof PromptValidationServiceError) {
+      console.error("Prompt validation service failed", error);
+      return setTrialSessionCookie(
+        errorResponse("Prompt validation is temporarily unavailable.", 503),
+        trialSession,
+      );
+    }
+
     console.error("Unable to validate image submission prompt", error);
     return setTrialSessionCookie(
-      errorResponse(
-        "Please describe the holiday icon you want without additional instructions.",
-        400,
-      ),
+      errorResponse("Prompt validation is temporarily unavailable.", 503),
       trialSession,
     );
+  } finally {
+    try {
+      await validationLease.release();
+    } catch (error) {
+      console.error("Unable to release submission validation lease", error);
+    }
   }
 
   try {
     const result = await imageSubmissionService.admitImageJob({
       input,
+      owner: imageJobOwner(identity),
       usageIdentity,
     });
 

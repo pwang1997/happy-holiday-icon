@@ -87,6 +87,72 @@ variable "max_source_image_pixels" {
   }
 }
 
+variable "submission_rate_limit_window_seconds" {
+  type        = number
+  description = "Fixed window used to rate-limit prompt validation before OpenAI is called."
+  default     = 60
+
+  validation {
+    condition     = floor(var.submission_rate_limit_window_seconds) == var.submission_rate_limit_window_seconds && var.submission_rate_limit_window_seconds >= 10 && var.submission_rate_limit_window_seconds <= 3600
+    error_message = "submission_rate_limit_window_seconds must be between 10 seconds and one hour."
+  }
+}
+
+variable "anonymous_submission_rate_limit" {
+  type        = number
+  description = "Maximum anonymous prompt validations per rate-limit window and trusted client address."
+  default     = 3
+
+  validation {
+    condition     = floor(var.anonymous_submission_rate_limit) == var.anonymous_submission_rate_limit && var.anonymous_submission_rate_limit >= 1 && var.anonymous_submission_rate_limit <= 100
+    error_message = "anonymous_submission_rate_limit must be between 1 and 100."
+  }
+}
+
+variable "authenticated_submission_rate_limit" {
+  type        = number
+  description = "Maximum authenticated prompt validations per rate-limit window and Cognito subject."
+  default     = 10
+
+  validation {
+    condition     = floor(var.authenticated_submission_rate_limit) == var.authenticated_submission_rate_limit && var.authenticated_submission_rate_limit >= 1 && var.authenticated_submission_rate_limit <= 1000
+    error_message = "authenticated_submission_rate_limit must be between 1 and 1000."
+  }
+}
+
+variable "anonymous_submission_max_concurrency" {
+  type        = number
+  description = "Maximum simultaneous anonymous prompt validations per trusted client address."
+  default     = 1
+
+  validation {
+    condition     = floor(var.anonymous_submission_max_concurrency) == var.anonymous_submission_max_concurrency && var.anonymous_submission_max_concurrency >= 1 && var.anonymous_submission_max_concurrency <= 10
+    error_message = "anonymous_submission_max_concurrency must be between 1 and 10."
+  }
+}
+
+variable "authenticated_submission_max_concurrency" {
+  type        = number
+  description = "Maximum simultaneous authenticated prompt validations per Cognito subject."
+  default     = 2
+
+  validation {
+    condition     = floor(var.authenticated_submission_max_concurrency) == var.authenticated_submission_max_concurrency && var.authenticated_submission_max_concurrency >= 1 && var.authenticated_submission_max_concurrency <= 20
+    error_message = "authenticated_submission_max_concurrency must be between 1 and 20."
+  }
+}
+
+variable "submission_concurrency_lease_seconds" {
+  type        = number
+  description = "Recovery lease for a prompt-validation concurrency slot after a runtime crash."
+  default     = 60
+
+  validation {
+    condition     = floor(var.submission_concurrency_lease_seconds) == var.submission_concurrency_lease_seconds && var.submission_concurrency_lease_seconds >= 10 && var.submission_concurrency_lease_seconds <= 300
+    error_message = "submission_concurrency_lease_seconds must be between 10 seconds and five minutes."
+  }
+}
+
 variable "image_generation_visibility_timeout_seconds" {
   type        = number
   description = "SQS visibility timeout for a source-image generation job. Keep this at least six times the generation Lambda timeout."

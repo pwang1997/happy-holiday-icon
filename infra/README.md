@@ -7,7 +7,9 @@ This module provisions two private S3 buckets:
 
 It also provisions `image_jobs_table_name` / `DYNAMODB_JOBS_TABLE`, an on-demand DynamoDB table for transient image job status. Store the status in a `status` attribute and the Unix epoch expiration time in `expires_at`; TTL cleanup is enabled for that attribute.
 
-It provisions `anonymous_usage_table_name` / `DYNAMODB_USAGE_TABLE`, an on-demand DynamoDB table that records usage for anonymous sessions and authenticated Cognito users. Its conditional counter enforces five anonymous trials per session. The cookie stores only an opaque session identifier; it does not store usage counts.
+It provisions `anonymous_usage_table_name` / `DYNAMODB_USAGE_TABLE`, an on-demand DynamoDB table that records usage for anonymous visitors and authenticated Cognito users. Its conditional counter enforces five anonymous trials per trusted client address. The browser cookie remains an opaque image-job owner identifier; it does not determine anonymous trial usage.
+
+It also provisions `submission_guard_table_name` / `DYNAMODB_SUBMISSION_GUARD_TABLE`, an on-demand DynamoDB table that atomically limits prompt-validation requests before the Next.js runtime calls OpenAI. The defaults allow three anonymous and ten authenticated validations per minute, with one and two simultaneous validations respectively. Its items expire automatically after the rate window or concurrency lease.
 
 It provisions a Cognito user pool and public OAuth web client for the eventual
 login/wallet entitlement flow. The client uses authorization-code flow and has
@@ -64,13 +66,14 @@ terraform -chdir=infra plan
 terraform -chdir=infra apply
 ```
 
-The HCP Terraform workspace stores the state. Set `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_S3_FINAL_BUCKET`, `IMAGE_MAX_UPLOAD_BYTES`, `DYNAMODB_JOBS_TABLE`, `DYNAMODB_USAGE_TABLE`, `COGNITO_USER_POOL_ID`, `COGNITO_WEB_CLIENT_ID`, `COGNITO_DOMAIN`, and `COGNITO_ISSUER` in the Next.js runtime from the Terraform outputs. The app uses `/api/auth/login`, `/auth/callback`, and `/api/auth/logout` for the Cognito authorization-code flow. Attach `image_jobs_policy_arn` and `anonymous_usage_policy_arn` to the Next.js runtime identity. Do not put AWS credentials in Terraform variables or commit `.env` files.
+The HCP Terraform workspace stores the state. Set the `app_environment` values—including `DYNAMODB_SUBMISSION_GUARD_TABLE` and the submission-rate configuration—in the Next.js runtime from the Terraform outputs. Also set a private `SUBMISSION_GUARD_SECRET` outside Terraform state. For anonymous traffic, the trusted proxy must strip any client-provided `X-Submission-Proxy-Token`, inject that secret as the request header, and overwrite `X-Forwarded-For` with the client address. The application HMACs the address before storage. The app uses `/api/auth/login`, `/auth/callback`, and `/api/auth/logout` for the Cognito authorization-code flow. Attach `image_jobs_policy_arn`, `anonymous_usage_policy_arn`, and `submission_guard_policy_arn` to the Next.js runtime identity. Do not put AWS credentials or `SUBMISSION_GUARD_SECRET` in Terraform variables or commit `.env` files.
 
 ## Application contract for asynchronous generation
 
-`POST /api/submit` authenticates and reserves usage before it creates a
-DynamoDB job, then returns `202 Accepted`, the job ID, and a constrained
-presigned POST upload instruction.
+`POST /api/submit` validates the request, authenticates the caller, and applies
+the DynamoDB-backed rate and concurrency guard before calling OpenAI prompt
+validation. It then creates a DynamoDB job, records usage, and returns `202
+Accepted`, the job ID, and a constrained presigned POST upload instruction.
 S3 rejects source uploads outside `max_source_image_bytes` (10 MiB by default),
 and the generator independently verifies size, format, dimensions, and the
 event's exact object version before it reads the object body. The job

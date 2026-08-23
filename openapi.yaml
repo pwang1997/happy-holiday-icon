@@ -64,17 +64,19 @@ paths:
       operationId: submitImageJob
       summary: Admit an image job and create a bounded source upload form
       description: |
-        Authenticates the caller, reserves usage, creates an `UPLOADING` job,
-        and returns before the source upload or image generation begins. Submit
-        the returned `upload.fields` and original source file as a multipart
-        form POST to `upload.url`; S3 enforces the form's content type and byte
-        limit. Then poll `GET /api/jobs/{jobId}` for status and final signed
-        URLs.
+        Authenticates the caller, enforces a per-caller rate and concurrency
+        limit before prompt validation, creates an `UPLOADING` job, records
+        usage, and returns before the source upload or image generation begins.
+        Submit the returned `upload.fields` and original source file as a
+        multipart form POST to `upload.url`; S3 enforces the form's content type
+        and byte limit. Then poll `GET /api/jobs/{jobId}` for status and final
+        signed URLs.
 
         A valid Cognito access token can be sent as a bearer token or the
         `cognito_access_token` HTTP-only cookie. Requests without a Cognito
-        session use the anonymous five-trial allowance; the server returns a
-        `session_token` cookie for that path.
+        session use the anonymous five-trial allowance per trusted client
+        address; the server returns a `session_token` cookie for image-job
+        ownership on that path.
       security:
         - bearerAuth: []
         - cognitoAccessToken: []
@@ -126,7 +128,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: The anonymous session has used all five trials.
+          description: The anonymous client address has used all five trials.
           headers:
             Set-Cookie:
               description: Refreshes the anonymous HTTP-only trial session cookie.
@@ -136,8 +138,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: The caller has exceeded the prompt-validation rate or concurrency limit.
+          headers:
+            Retry-After:
+              description: Seconds until another validation request may be attempted.
+              schema:
+                type: integer
+                minimum: 1
+            Set-Cookie:
+              description: May be sent for anonymous requests after a trial session is created.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
-          description: A required Cognito, DynamoDB, or S3 dependency is unavailable or not configured.
+          description: Prompt validation, submission protection, Cognito, DynamoDB, or S3 is unavailable or not configured.
           headers:
             Set-Cookie:
               description: May be sent for anonymous requests after a trial session is created.

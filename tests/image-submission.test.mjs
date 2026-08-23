@@ -29,6 +29,16 @@ const INPUT = {
   style: "playful",
 };
 
+const OWNER = {
+  ownerId: "ANONYMOUS#job-owner",
+  ownerType: "anonymous",
+};
+
+const USAGE_IDENTITY = {
+  kind: "anonymous",
+  visitorId: "visitor-id",
+};
+
 function createService({ recordUsage = async () => 1, onCreate, onUpdate } = {}) {
   return createImageSubmissionService({
     createImageUploadJob: async (input) => {
@@ -78,21 +88,18 @@ test("creates an owned upload job before recording usage", async () => {
 
   const result = await service.admitImageJob({
     input: INPUT,
-    usageIdentity: { kind: "anonymous", sessionToken: "trial-token" },
+    owner: OWNER,
+    usageIdentity: USAGE_IDENTITY,
   });
 
   assert.deepEqual(result, JOB);
   assert.deepEqual(usage, [
-    { kind: "anonymous", sessionToken: "trial-token" },
+    USAGE_IDENTITY,
   ]);
   assert.deepEqual(created, [
     {
       ...INPUT,
-      owner: {
-        ownerId:
-          "ANONYMOUS#6edf550811a5477ddf2d63eabcc169d010974b8f6e2133575d55146c3392bb2b",
-        ownerType: "anonymous",
-      },
+      owner: OWNER,
     },
   ]);
 });
@@ -115,7 +122,8 @@ test("fails the unuploaded job when the anonymous trial is exhausted", async () 
     () =>
       service.admitImageJob({
         input: INPUT,
-        usageIdentity: { kind: "anonymous", sessionToken: "trial-token" },
+        owner: OWNER,
+        usageIdentity: USAGE_IDENTITY,
       }),
     (error) => error instanceof ImageSubmissionError && error.status === 403,
   );

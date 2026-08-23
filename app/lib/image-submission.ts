@@ -9,9 +9,9 @@ import {
   MAX_FREE_TRIALS,
   isTrialLimitError,
   recordUsage,
-  usageOwner,
   type UsageIdentity,
 } from "./usage";
+import type { ImageJobOwner } from "./jobs";
 import { getMaxSourceImageBytes } from "./s3";
 
 export type ImageSubmissionInput = ImageJobAdmissionInput;
@@ -93,9 +93,11 @@ export function createImageSubmissionService({
   return {
     async admitImageJob({
       input,
+      owner,
       usageIdentity,
     }: {
       input: ImageSubmissionInput;
+      owner: ImageJobOwner;
       usageIdentity: UsageIdentity;
     }) {
       let job;
@@ -103,7 +105,7 @@ export function createImageSubmissionService({
       try {
         job = await createImageUploadJob({
           ...input,
-          owner: usageOwner(usageIdentity),
+          owner,
         });
       } catch (error) {
         throw toSubmissionError(error);

@@ -80,3 +80,25 @@ resource "aws_iam_policy" "nextjs_anonymous_usage" {
     ]
   })
 }
+
+resource "aws_iam_policy" "nextjs_submission_guard" {
+  name        = "${var.project_name}-${var.environment}-submission-guard"
+  description = "Allow the Next.js runtime to enforce submission validation limits."
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Sid    = "SubmissionGuard"
+        Effect = "Allow"
+
+        Action = [
+          "dynamodb:UpdateItem",
+        ]
+
+        Resource = aws_dynamodb_table.submission_guard.arn
+      },
+    ]
+  })
+}

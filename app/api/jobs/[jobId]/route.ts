@@ -1,5 +1,6 @@
 import {
   getSubmissionAuth,
+  imageJobOwner,
   SubmissionAuthenticationError,
 } from "@/app/lib/auth-service";
 import { errorResponse } from "@/app/lib/http-responses";
@@ -7,7 +8,6 @@ import {
   imageJobService,
   ImageJobServiceError,
 } from "@/app/lib/image-job-service";
-import { usageOwner } from "@/app/lib/usage";
 import { NextRequest } from "next/server";
 
 export async function GET(
@@ -32,7 +32,7 @@ export async function GET(
     return Response.json(
       await imageJobService.getImageJobStatus(
         jobId,
-        usageOwner(submissionAuth.usageIdentity),
+        imageJobOwner(submissionAuth.identity),
       ),
     );
   } catch (error) {

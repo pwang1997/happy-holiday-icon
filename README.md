@@ -83,7 +83,7 @@ flowchart LR
 
 ## API contract
 
-[`openapi.yaml`](openapi.yaml) documents the six App Router endpoints for **job admission**, **polling**, and **Cognito auth**. Before admitting a job, `POST /api/submit` validates the request, authenticates the caller, and rejects attempts to override the image-generation instructions. It then creates the job, records usage, and returns the bounded presigned S3 POST upload handoff.
+[`openapi.yaml`](openapi.yaml) documents the six App Router endpoints for **job admission**, **polling**, and **Cognito auth**. Before OpenAI prompt validation, `POST /api/submit` validates the request, authenticates the caller, and atomically enforces per-caller rate and concurrency limits. It then rejects attempts to override the image-generation instructions, creates the job, records usage, and returns the bounded presigned S3 POST upload handoff.
 
 ## Provision infrastructure
 
@@ -97,7 +97,7 @@ terraform -chdir=infra plan
 terraform -chdir=infra apply
 ```
 
-Configure the Next.js runtime from the `app_environment` Terraform output. Attach `image_upload_policy_arn`, `image_jobs_policy_arn`, and `anonymous_usage_policy_arn` to its runtime identity. Terraform configures the Lambda execution role, S3 notification, and Lambda access automatically.
+Configure the Next.js runtime from the `app_environment` Terraform output. Attach `image_upload_policy_arn`, `image_jobs_policy_arn`, `anonymous_usage_policy_arn`, and `submission_guard_policy_arn` to its runtime identity. Set the private `SUBMISSION_GUARD_SECRET` separately. Anonymous submissions require the trusted proxy to remove any client-supplied `X-Submission-Proxy-Token`, inject the configured secret, and supply a sanitized `X-Forwarded-For` header. Terraform configures the Lambda execution role, S3 notification, and Lambda access automatically.
 
 ## Test coverage
 

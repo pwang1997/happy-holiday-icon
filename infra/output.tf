@@ -53,6 +53,16 @@ output "anonymous_usage_policy_arn" {
   value       = aws_iam_policy.nextjs_anonymous_usage.arn
 }
 
+output "submission_guard_table_name" {
+  description = "Name of the DynamoDB table used to rate-limit prompt validation."
+  value       = aws_dynamodb_table.submission_guard.name
+}
+
+output "submission_guard_policy_arn" {
+  description = "Attach this policy to the identity used by the Next.js runtime."
+  value       = aws_iam_policy.nextjs_submission_guard.arn
+}
+
 output "image_reshaper_function_name" {
   description = "Name of the Lambda function that reshapes temporary images."
   value       = aws_lambda_function.image_reshaper.function_name
@@ -126,15 +136,22 @@ output "cognito_issuer" {
 output "app_environment" {
   description = "Non-secret environment values required by the Next.js runtime."
   value = {
-    AWS_REGION             = var.aws_region
-    AWS_S3_BUCKET          = aws_s3_bucket.images.bucket
-    AWS_S3_FINAL_BUCKET    = aws_s3_bucket.final_images.bucket
-    IMAGE_MAX_UPLOAD_BYTES = var.max_source_image_bytes
-    DYNAMODB_JOBS_TABLE    = aws_dynamodb_table.image_jobs.name
-    DYNAMODB_USAGE_TABLE   = aws_dynamodb_table.anonymous_usage.name
-    COGNITO_USER_POOL_ID   = aws_cognito_user_pool.users.id
-    COGNITO_WEB_CLIENT_ID  = aws_cognito_user_pool_client.web.id
-    COGNITO_DOMAIN         = "https://${aws_cognito_user_pool_domain.web.domain}.auth.${var.aws_region}.amazoncognito.com"
-    COGNITO_ISSUER         = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.users.id}"
+    AWS_REGION                               = var.aws_region
+    AWS_S3_BUCKET                            = aws_s3_bucket.images.bucket
+    AWS_S3_FINAL_BUCKET                      = aws_s3_bucket.final_images.bucket
+    IMAGE_MAX_UPLOAD_BYTES                   = var.max_source_image_bytes
+    DYNAMODB_JOBS_TABLE                      = aws_dynamodb_table.image_jobs.name
+    DYNAMODB_USAGE_TABLE                     = aws_dynamodb_table.anonymous_usage.name
+    DYNAMODB_SUBMISSION_GUARD_TABLE          = aws_dynamodb_table.submission_guard.name
+    SUBMISSION_RATE_LIMIT_WINDOW_SECONDS     = var.submission_rate_limit_window_seconds
+    ANONYMOUS_SUBMISSION_RATE_LIMIT          = var.anonymous_submission_rate_limit
+    AUTHENTICATED_SUBMISSION_RATE_LIMIT      = var.authenticated_submission_rate_limit
+    ANONYMOUS_SUBMISSION_MAX_CONCURRENCY     = var.anonymous_submission_max_concurrency
+    AUTHENTICATED_SUBMISSION_MAX_CONCURRENCY = var.authenticated_submission_max_concurrency
+    SUBMISSION_CONCURRENCY_LEASE_SECONDS     = var.submission_concurrency_lease_seconds
+    COGNITO_USER_POOL_ID                     = aws_cognito_user_pool.users.id
+    COGNITO_WEB_CLIENT_ID                    = aws_cognito_user_pool_client.web.id
+    COGNITO_DOMAIN                           = "https://${aws_cognito_user_pool_domain.web.domain}.auth.${var.aws_region}.amazoncognito.com"
+    COGNITO_ISSUER                           = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.users.id}"
   }
 }
