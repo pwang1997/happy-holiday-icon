@@ -75,13 +75,14 @@ resource "aws_lambda_function" "image_reshaper" {
   source_code_hash = filebase64sha256(local.image_reshaper_package_path)
 
   memory_size = 1024
-  timeout     = 60
+  timeout     = var.image_reshaping_timeout_seconds
 
   environment {
     variables = {
-      SOURCE_BUCKET       = aws_s3_bucket.images.bucket
-      DESTINATION_BUCKET  = aws_s3_bucket.final_images.bucket
-      DYNAMODB_JOBS_TABLE = aws_dynamodb_table.image_jobs.name
+      SOURCE_BUCKET           = aws_s3_bucket.images.bucket
+      DESTINATION_BUCKET      = aws_s3_bucket.final_images.bucket
+      DYNAMODB_JOBS_TABLE     = aws_dynamodb_table.image_jobs.name
+      RESHAPING_LEASE_SECONDS = var.image_reshaping_timeout_seconds + var.image_reshaping_lease_grace_seconds
     }
   }
 

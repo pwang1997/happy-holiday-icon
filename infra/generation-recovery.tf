@@ -47,6 +47,12 @@ resource "aws_iam_role_policy" "image_generation_recovery" {
         Action   = ["sqs:SendMessage"]
         Resource = aws_sqs_queue.image_generation.arn
       },
+      {
+        Sid      = "ReplayExpiredReshapingLeases"
+        Effect   = "Allow"
+        Action   = ["lambda:InvokeFunction"]
+        Resource = aws_lambda_function.image_reshaper.arn
+      },
     ]
   })
 }
@@ -83,6 +89,10 @@ resource "aws_lambda_function" "image_generation_recovery" {
       GENERATION_RECOVERY_INDEX           = "generation-recovery"
       GENERATION_RETRY_BASE_DELAY_SECONDS = var.image_generation_retry_base_delay_seconds
       IMAGE_GENERATION_QUEUE_URL          = aws_sqs_queue.image_generation.url
+      IMAGE_RESHAPER_FUNCTION_NAME        = aws_lambda_function.image_reshaper.function_name
+      RESHAPING_LEASE_SECONDS             = var.image_reshaping_timeout_seconds + var.image_reshaping_lease_grace_seconds
+      RESHAPING_MAX_RETRIES               = var.image_reshaping_max_retries
+      RESHAPING_RETRY_BASE_DELAY_SECONDS  = var.image_reshaping_retry_base_delay_seconds
       SOURCE_BUCKET                       = aws_s3_bucket.images.bucket
     }
   }

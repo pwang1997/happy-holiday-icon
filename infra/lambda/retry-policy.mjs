@@ -50,6 +50,44 @@ export function generationRetryClaim(
   };
 }
 
+export function reshapingRetryClaim(
+  expectedAttempt,
+  expectedReshapingRetryAt,
+  now,
+  leaseSeconds,
+) {
+  if (!Number.isSafeInteger(expectedAttempt) || expectedAttempt < 2) {
+    throw new Error("expectedAttempt must be an integer greater than one");
+  }
+
+  if (
+    !Number.isSafeInteger(expectedReshapingRetryAt) ||
+    expectedReshapingRetryAt <= 0
+  ) {
+    throw new Error("expectedReshapingRetryAt must be a positive integer");
+  }
+
+  if (!Number.isSafeInteger(now) || now < 0) {
+    throw new Error("now must be a non-negative integer");
+  }
+
+  if (!Number.isSafeInteger(leaseSeconds) || leaseSeconds <= 0) {
+    throw new Error("leaseSeconds must be a positive integer");
+  }
+
+  const renewedReshapingRetryAt = now + leaseSeconds;
+
+  if (!Number.isSafeInteger(renewedReshapingRetryAt)) {
+    throw new Error("renewed reshaping retry time must be a safe integer");
+  }
+
+  return {
+    expectedReshapingRetryAt,
+    previousAttempt: expectedAttempt - 1,
+    renewedReshapingRetryAt,
+  };
+}
+
 export function generationRecoveryAction(
   completedAttempts,
   maxRetries,

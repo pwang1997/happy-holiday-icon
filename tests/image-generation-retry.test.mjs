@@ -5,6 +5,7 @@ import {
   generationRecoveryAction,
   generationRetryDelaySeconds,
   MAX_GENERATION_RETRIES,
+  reshapingRetryClaim,
 } from "../infra/lambda/retry-policy.mjs";
 
 test("uses three generation retries with exponential retry delays", () => {
@@ -31,6 +32,14 @@ test("requires a retry claim to identify the exact scheduled lease", () => {
     () => generationRetryClaim(2, 0, 1_400, 960),
     /expectedGenerationRetryAt must be a positive integer/,
   );
+});
+
+test("renews a reshaping lease from its actual claim time", () => {
+  assert.deepEqual(reshapingRetryClaim(2, 1_090, 1_400, 120), {
+    expectedReshapingRetryAt: 1_090,
+    previousAttempt: 1,
+    renewedReshapingRetryAt: 1_520,
+  });
 });
 
 test("stops recovery after the configured retry limit", () => {

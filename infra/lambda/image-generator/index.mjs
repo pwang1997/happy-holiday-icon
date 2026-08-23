@@ -320,6 +320,8 @@ async function claimInitialGeneration(jobId, sourceVersionId) {
       },
     }),
   );
+
+  return { generationAttempt: 1, generationRetryAt: retryAt };
 }
 
 async function claimRetryGeneration(
@@ -368,6 +370,11 @@ async function claimRetryGeneration(
       },
     }),
   );
+
+  return {
+    generationAttempt: expectedAttempt,
+    generationRetryAt: claim.renewedGenerationRetryAt,
+  };
 }
 
 async function markJobFailed(jobId, error, expectedStatus) {
@@ -499,14 +506,13 @@ async function generateImage({ input, contentType, extension, prompt, style }) {
 }
 
 async function generateClaimedImage({
+  generationClaim,
   job,
   sourceBucket,
   sourceDetails,
   sourceKey,
   sourceVersionId,
 }) {
-  let failureStatus = "GENERATING";
-
   try {
     const source = await getValidatedSourceImage({
       bucket: sourceBucket,
@@ -525,13 +531,6 @@ async function generateClaimedImage({
       style: job.style,
     });
 
-    await updateJob(
-      sourceDetails.jobId,
-      { status: "RESHAPING", error: null },
-      "GENERATING",
-    );
-    failureStatus = "RESHAPING";
-
     const generatedKey = `images/${sourceDetails.jobId}/generated.png`;
     await s3.send(
       new PutObjectCommand({
@@ -539,17 +538,21 @@ async function generateClaimedImage({
         Key: generatedKey,
         Body: output,
         ContentType: "image/png",
-        Metadata: { jobid: sourceDetails.jobId },
+        Metadata: {
+          generationattempt: String(generationClaim.generationAttempt),
+          generationlease: String(generationClaim.generationRetryAt),
+          jobid: sourceDetails.jobId,
+        },
       }),
     );
 
     return {
       generatedKey,
       jobId: sourceDetails.jobId,
-      status: "RESHAPING",
+      status: "GENERATED",
     };
   } catch (error) {
-    const failed = await markJobFailed(sourceDetails.jobId, error, failureStatus);
+    const failed = await markJobFailed(sourceDetails.jobId, error, "GENERATING");
 
     if (!failed) {
       console.info("Image job reached a terminal state before the worker could fail it", {
@@ -652,8 +655,10 @@ async function processS3Record(record) {
     return { jobId: sourceDetails.jobId, status: "FAILED" };
   }
 
+  let generationClaim;
+
   try {
-    await claimInitialGeneration(sourceDetails.jobId, sourceVersionId);
+    generationClaim = await claimInitialGeneration(sourceDetails.jobId, sourceVersionId);
   } catch (error) {
     if (isConditionalCheckFailed(error)) {
       return { skipped: true, reason: "job-already-claimed" };
@@ -663,6 +668,7 @@ async function processS3Record(record) {
   }
 
   return generateClaimedImage({
+    generationClaim,
     job,
     sourceBucket,
     sourceDetails,
@@ -706,8 +712,10 @@ async function processGenerationRetry(message) {
     return { jobId: sourceDetails.jobId, status: "FAILED" };
   }
 
+  let generationClaim;
+
   try {
-    await claimRetryGeneration(
+    generationClaim = await claimRetryGeneration(
       sourceDetails.jobId,
       message.sourceVersionId,
       message.expectedAttempt,
@@ -722,6 +730,7 @@ async function processGenerationRetry(message) {
   }
 
   return generateClaimedImage({
+    generationClaim,
     job,
     sourceBucket: message.sourceBucket,
     sourceDetails,

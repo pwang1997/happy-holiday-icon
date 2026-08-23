@@ -208,6 +208,50 @@ variable "image_generation_retry_base_delay_seconds" {
   }
 }
 
+variable "image_reshaping_timeout_seconds" {
+  type        = number
+  description = "Maximum execution time for one image-reshaping Lambda invocation."
+  default     = 60
+
+  validation {
+    condition     = var.image_reshaping_timeout_seconds >= 60 && var.image_reshaping_timeout_seconds <= 900
+    error_message = "image_reshaping_timeout_seconds must be between 60 and 900 seconds."
+  }
+}
+
+variable "image_reshaping_lease_grace_seconds" {
+  type        = number
+  description = "Extra time after the reshaper timeout before a stale reshape lease can be recovered."
+  default     = 60
+
+  validation {
+    condition     = var.image_reshaping_lease_grace_seconds >= 30 && var.image_reshaping_lease_grace_seconds <= 900
+    error_message = "image_reshaping_lease_grace_seconds must be between 30 seconds and 15 minutes."
+  }
+}
+
+variable "image_reshaping_max_retries" {
+  type        = number
+  description = "Maximum reshaper retries after the initial attempt before an expired reshape lease becomes FAILED."
+  default     = 3
+
+  validation {
+    condition     = var.image_reshaping_max_retries >= 1 && var.image_reshaping_max_retries <= 10
+    error_message = "image_reshaping_max_retries must be between 1 and 10."
+  }
+}
+
+variable "image_reshaping_retry_base_delay_seconds" {
+  type        = number
+  description = "Initial delay for a recovered reshaper attempt; later retries double it."
+  default     = 30
+
+  validation {
+    condition     = var.image_reshaping_retry_base_delay_seconds >= 1 && var.image_reshaping_retry_base_delay_seconds <= 900
+    error_message = "image_reshaping_retry_base_delay_seconds must be between 1 second and 15 minutes."
+  }
+}
+
 variable "image_generation_reserved_concurrency" {
   type        = number
   description = "Maximum concurrent image-generation Lambda executions and SQS consumers."
