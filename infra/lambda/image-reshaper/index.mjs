@@ -1,6 +1,7 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import {
   DynamoDBClient,
+  GetItemCommand,
   UpdateItemCommand,
 } from "@aws-sdk/client-dynamodb";
 import sharp from "sharp";
@@ -76,6 +77,44 @@ function isConditionalCheckFailed(error) {
 function metadataPositiveInteger(metadata, name) {
   const value = Number(metadata?.[name]);
   return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+function valueAsString(item, name) {
+  const value = item?.[name]?.S;
+  return typeof value === "string" ? value : null;
+}
+
+function valueAsNumber(item, name) {
+  const value = Number(item?.[name]?.N);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+async function existingReshapingClaim(jobId, generatedKey, generatedVersionId) {
+  const result = await dynamodb.send(
+    new GetItemCommand({
+      TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
+      Key: { job_id: { S: jobId } },
+      ConsistentRead: true,
+    }),
+  );
+  const item = result.Item;
+
+  if (
+    valueAsString(item, "status") !== "RESHAPING" ||
+    valueAsString(item, "generated_key") !== generatedKey ||
+    valueAsString(item, "generated_version_id") !== generatedVersionId
+  ) {
+    return null;
+  }
+
+  const reshapingAttempt = valueAsNumber(item, "reshaping_attempt");
+  const reshapingRetryAt = valueAsNumber(item, "generation_retry_at");
+
+  if (!reshapingAttempt || !reshapingRetryAt) {
+    return null;
+  }
+
+  return { reshapingAttempt, reshapingRetryAt };
 }
 
 async function updateJob(
@@ -162,6 +201,7 @@ async function claimInitialReshaping({
         ":generatedVersionId": { S: generatedVersionId },
         ":generationAttempt": { N: String(generationAttempt) },
         ":generationRetryAt": { N: String(generationRetryAt) },
+        ":generating": { S: "GENERATING" },
         ":now": { N: String(now) },
         ":null": { NULL: true },
         ":reshaping": { S: "RESHAPING" },
@@ -395,10 +435,18 @@ async function processS3Record(record, destinationBucket) {
     });
   } catch (error) {
     if (isConditionalCheckFailed(error)) {
-      return { key: sourceKey, jobId: generated.jobId, skipped: true, reason: "job-not-generating" };
-    }
+      reshapingClaim = await existingReshapingClaim(
+        generated.jobId,
+        sourceKey,
+        sourceVersionId,
+      );
 
-    throw error;
+      if (!reshapingClaim) {
+        return { key: sourceKey, jobId: generated.jobId, skipped: true, reason: "job-not-reshaping" };
+      }
+    } else {
+      throw error;
+    }
   }
 
   return reshapeClaimedImage({

@@ -166,29 +166,29 @@ variable "image_generation_visibility_timeout_seconds" {
 
 variable "image_generation_timeout_seconds" {
   type        = number
-  description = "Maximum execution time for one image-generation Lambda invocation."
-  default     = 900
+  description = "Maximum execution time for one image-generation Lambda invocation; keep it below five minutes."
+  default     = 270
 
   validation {
-    condition     = var.image_generation_timeout_seconds >= 60 && var.image_generation_timeout_seconds <= 900
-    error_message = "image_generation_timeout_seconds must be between 60 and 900 seconds."
+    condition     = var.image_generation_timeout_seconds >= 60 && var.image_generation_timeout_seconds < 300
+    error_message = "image_generation_timeout_seconds must be between 60 seconds and five minutes."
   }
 }
 
 variable "image_generation_lease_grace_seconds" {
   type        = number
-  description = "Extra time after the generator timeout before a stale job can be recovered."
-  default     = 60
+  description = "Extra time after the generator timeout before an unfinished generation is failed."
+  default     = 30
 
   validation {
-    condition     = var.image_generation_lease_grace_seconds >= 30 && var.image_generation_lease_grace_seconds <= 900
-    error_message = "image_generation_lease_grace_seconds must be between 30 seconds and 15 minutes."
+    condition     = var.image_generation_lease_grace_seconds >= 30 && var.image_generation_timeout_seconds + var.image_generation_lease_grace_seconds <= 300
+    error_message = "image_generation_lease_grace_seconds must be at least 30 seconds and keep the total generation lease at five minutes or less."
   }
 }
 
 variable "image_generation_max_retries" {
   type        = number
-  description = "Maximum generator retries after the initial attempt before an expired generation lease becomes FAILED."
+  description = "Maximum generator retries after an explicitly retryable provider failure."
   default     = 3
 
   validation {

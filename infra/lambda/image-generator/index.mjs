@@ -11,6 +11,8 @@ import {
 } from "@aws-sdk/client-secrets-manager";
 import sharp from "sharp";
 import {
+  GENERATION_RETRY_PENDING,
+  GENERATION_RETRY_SCHEDULED,
   generationFailureDisposition,
   generationRetryClaim,
   isJobExpired,
@@ -265,6 +267,7 @@ async function getJob(jobId) {
     expiresAt: valueAsNumber(item, "expires_at"),
     generationAttempt: valueAsNumber(item, "generation_attempt") ?? 0,
     generationRetryAt: valueAsNumber(item, "generation_retry_at"),
+    generationRetryState: valueAsString(item, "generation_retry_state"),
     status: valueAsString(item, "status"),
     sourceKey: valueAsString(item, "source_key"),
     sourceVersionId: valueAsString(item, "source_version_id"),
@@ -291,7 +294,10 @@ async function updateJob(
     ":updatedAt": { N: String(nowInSeconds()) },
   };
   const assignments = ["#status = :status", "#updatedAt = :updatedAt"];
-  const removals = status === "GENERATING" ? [] : ["#generationRetryAt"];
+  const removals =
+    status === "GENERATING"
+      ? []
+      : ["#generationRetryAt", "#generationRetryState"];
   const conditions = [
     "attribute_exists(job_id)",
     "#expectedStatus = :expectedStatus",
@@ -309,6 +315,10 @@ async function updateJob(
       "#generationAttempt = :generationAttempt",
       "#generationRetryAt = :generationRetryAt",
     );
+  }
+
+  if (removals.includes("#generationRetryState")) {
+    names["#generationRetryState"] = "generation_retry_state";
   }
 
   if (error !== undefined) {
@@ -345,11 +355,12 @@ async function markGenerationRetryPending(jobId, error, generationClaim) {
         ConditionExpression:
           "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :generationAttempt AND #generationRetryAt = :generationRetryAt",
         UpdateExpression:
-          "SET #generationRetryAt = :now, #updatedAt = :now, #error = :error",
+          "SET #generationRetryAt = :now, #generationRetryState = :retryPending, #updatedAt = :now, #error = :error",
         ExpressionAttributeNames: {
           "#error": "error",
           "#generationAttempt": "generation_attempt",
           "#generationRetryAt": "generation_retry_at",
+          "#generationRetryState": "generation_retry_state",
           "#status": "status",
           "#updatedAt": "updated_at",
         },
@@ -368,6 +379,7 @@ async function markGenerationRetryPending(jobId, error, generationClaim) {
             N: String(generationClaim.generationRetryAt),
           },
           ":now": { N: String(now) },
+          ":retryPending": { S: GENERATION_RETRY_PENDING },
         },
       }),
     );
@@ -436,14 +448,15 @@ async function claimRetryGeneration(
       TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
       Key: { job_id: { S: jobId } },
       ConditionExpression:
-        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :previousAttempt AND #generationRetryAt = :expectedGenerationRetryAt AND #sourceVersionId = :sourceVersionId AND #expiresAt > :now",
+        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :previousAttempt AND #generationRetryAt = :expectedGenerationRetryAt AND #generationRetryState = :retryScheduled AND #sourceVersionId = :sourceVersionId AND #expiresAt > :now",
       UpdateExpression:
-        "SET #generationAttempt = :expectedAttempt, #generationRetryAt = :renewedGenerationRetryAt, #updatedAt = :now, #error = :null",
+        "SET #generationAttempt = :expectedAttempt, #generationRetryAt = :renewedGenerationRetryAt, #updatedAt = :now, #error = :null REMOVE #generationRetryState",
       ExpressionAttributeNames: {
         "#error": "error",
         "#expiresAt": "expires_at",
         "#generationAttempt": "generation_attempt",
         "#generationRetryAt": "generation_retry_at",
+        "#generationRetryState": "generation_retry_state",
         "#sourceVersionId": "source_version_id",
         "#status": "status",
         "#updatedAt": "updated_at",
@@ -460,6 +473,7 @@ async function claimRetryGeneration(
         ":renewedGenerationRetryAt": {
           N: String(claim.renewedGenerationRetryAt),
         },
+        ":retryScheduled": { S: GENERATION_RETRY_SCHEDULED },
         ":sourceVersionId": { S: sourceVersionId },
       },
     }),
@@ -469,6 +483,55 @@ async function claimRetryGeneration(
     generationAttempt: expectedAttempt,
     generationRetryAt: claim.renewedGenerationRetryAt,
   };
+}
+
+async function handoffGeneratedImage(
+  jobId,
+  generatedKey,
+  generatedVersionId,
+  generationClaim,
+) {
+  const now = nowInSeconds();
+  const reshapingRetryAt =
+    now + requiredPositiveIntegerEnvironment("RESHAPING_LEASE_SECONDS");
+
+  await dynamodb.send(
+    new UpdateItemCommand({
+      TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
+      Key: { job_id: { S: jobId } },
+      ConditionExpression:
+        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :generationAttempt AND #generationRetryAt = :generationRetryAt",
+      UpdateExpression:
+        "SET #status = :reshaping, #reshapingAttempt = :reshapingAttempt, #generationRetryAt = :reshapingRetryAt, #generatedKey = :generatedKey, #generatedVersionId = :generatedVersionId, #updatedAt = :now, #error = :null REMOVE #generationRetryState",
+      ExpressionAttributeNames: {
+        "#error": "error",
+        "#generatedKey": "generated_key",
+        "#generatedVersionId": "generated_version_id",
+        "#generationAttempt": "generation_attempt",
+        "#generationRetryAt": "generation_retry_at",
+        "#generationRetryState": "generation_retry_state",
+        "#reshapingAttempt": "reshaping_attempt",
+        "#status": "status",
+        "#updatedAt": "updated_at",
+      },
+      ExpressionAttributeValues: {
+        ":generatedKey": { S: generatedKey },
+        ":generatedVersionId": { S: generatedVersionId },
+        ":generating": { S: "GENERATING" },
+        ":generationAttempt": {
+          N: String(generationClaim.generationAttempt),
+        },
+        ":generationRetryAt": {
+          N: String(generationClaim.generationRetryAt),
+        },
+        ":now": { N: String(now) },
+        ":null": { NULL: true },
+        ":reshaping": { S: "RESHAPING" },
+        ":reshapingAttempt": { N: "1" },
+        ":reshapingRetryAt": { N: String(reshapingRetryAt) },
+      },
+    }),
+  );
 }
 
 async function markJobFailed(jobId, error, expectedStatus, generationClaim) {
@@ -498,6 +561,7 @@ async function markJobExpired(jobId, expectedStatus, generationClaim) {
     "#error": "error",
     "#expiresAt": "expires_at",
     "#generationRetryAt": "generation_retry_at",
+    "#generationRetryState": "generation_retry_state",
     "#status": "status",
     "#updatedAt": "updated_at",
   };
@@ -534,7 +598,7 @@ async function markJobExpired(jobId, expectedStatus, generationClaim) {
         Key: { job_id: { S: jobId } },
         ConditionExpression: conditions.join(" AND "),
         UpdateExpression:
-          "SET #status = :failed, #error = :error, #updatedAt = :now REMOVE #generationRetryAt",
+          "SET #status = :failed, #error = :error, #updatedAt = :now REMOVE #generationRetryAt, #generationRetryState",
         ExpressionAttributeNames: names,
         ExpressionAttributeValues: values,
       }),
@@ -715,7 +779,7 @@ async function generateClaimedImage({
     });
 
     const generatedKey = `images/${sourceDetails.jobId}/generated.png`;
-    await s3.send(
+    const generatedObject = await s3.send(
       new PutObjectCommand({
         Bucket: sourceBucket,
         Key: generatedKey,
@@ -728,11 +792,25 @@ async function generateClaimedImage({
         },
       }),
     );
+    const generatedVersionId = generatedObject.VersionId;
+
+    if (!generatedVersionId) {
+      throw terminalGenerationFailure(
+        "Generated image write did not return an object version",
+      );
+    }
+
+    await handoffGeneratedImage(
+      sourceDetails.jobId,
+      generatedKey,
+      generatedVersionId,
+      generationClaim,
+    );
 
     return {
       generatedKey,
       jobId: sourceDetails.jobId,
-      status: "GENERATED",
+      status: "RESHAPING",
     };
   } catch (error) {
     if (generationFailureDisposition(error) === RETRYABLE_GENERATION_FAILURE) {
@@ -916,7 +994,8 @@ async function processGenerationRetry(message) {
     job.sourceKey !== message.sourceKey ||
     job.sourceVersionId !== message.sourceVersionId ||
     job.generationAttempt !== message.expectedAttempt - 1 ||
-    job.generationRetryAt !== message.expectedGenerationRetryAt
+    job.generationRetryAt !== message.expectedGenerationRetryAt ||
+    job.generationRetryState !== GENERATION_RETRY_SCHEDULED
   ) {
     return { skipped: true, reason: "generation-retry-not-claimable" };
   }
@@ -1007,6 +1086,7 @@ export async function handler(event) {
   requiredPositiveIntegerEnvironment("GENERATION_LEASE_SECONDS");
   requiredPositiveIntegerEnvironment("GENERATION_MAX_RETRIES");
   requiredEnvironment("OPENAI_API_KEY_SECRET_ARN");
+  requiredPositiveIntegerEnvironment("RESHAPING_LEASE_SECONDS");
   requiredEnvironment("SOURCE_BUCKET");
 
   const batchItemFailures = [];

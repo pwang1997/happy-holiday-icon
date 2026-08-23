@@ -21,9 +21,8 @@ test("accepts only a PASS prompt-validation result", () => {
 test("bounds the validator model call", () => {
   assert.deepEqual(PROMPT_VALIDATION_MODEL_CONFIG, {
     maxRetries: 0,
-    maxTokens: 4,
+    maxTokens: 100,
     model: "gpt-5.6-luna",
-    temperature: 0,
     timeout: 5_000,
   });
 });

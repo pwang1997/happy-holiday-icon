@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  generationLeaseRecoveryAction,
   generationFailureDisposition,
   isJobExpired,
   generationRetryClaim,
   generationRecoveryAction,
   generationRetryDelaySeconds,
   MAX_GENERATION_RETRIES,
+  GENERATION_RETRY_PENDING,
+  GENERATION_RETRY_SCHEDULED,
   RETRYABLE_GENERATION_FAILURE,
   reshapingRetryClaim,
   TERMINAL_GENERATION_FAILURE,
@@ -114,4 +117,22 @@ test("stops recovery after the configured retry limit", () => {
     delaySeconds: 120,
   });
   assert.deepEqual(generationRecoveryAction(4, 3, 30), { action: "fail" });
+});
+
+test("fails a generation lease that expired while a worker was active", () => {
+  assert.deepEqual(generationLeaseRecoveryAction(1, 3, 30, null), {
+    action: "fail",
+    reason: "lease-expired",
+  });
+});
+
+test("retries only explicitly retryable generation failures", () => {
+  assert.deepEqual(
+    generationLeaseRecoveryAction(1, 3, 30, GENERATION_RETRY_PENDING),
+    { action: "retry", delaySeconds: 30 },
+  );
+  assert.deepEqual(
+    generationLeaseRecoveryAction(2, 3, 30, GENERATION_RETRY_SCHEDULED),
+    { action: "retry", delaySeconds: 60 },
+  );
 });

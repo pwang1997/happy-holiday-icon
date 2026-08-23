@@ -6,7 +6,9 @@ import {
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
 import {
-  generationRecoveryAction,
+  generationLeaseRecoveryAction,
+  GENERATION_RETRY_PENDING,
+  GENERATION_RETRY_SCHEDULED,
   isJobExpired,
 } from "./retry-policy.mjs";
 
@@ -54,13 +56,24 @@ function expiredGenerationJob(item) {
     expiresAt: valueAsNumber(item, "expires_at"),
     generationAttempt: valueAsNumber(item, "generation_attempt"),
     generationRetryAt: valueAsNumber(item, "generation_retry_at"),
+    generationRetryState: valueAsString(item, "generation_retry_state"),
     jobId: valueAsString(item, "job_id"),
     sourceBucket: requiredEnvironment("SOURCE_BUCKET"),
     sourceKey: valueAsString(item, "source_key"),
     sourceVersionId: valueAsString(item, "source_version_id"),
   };
 
-  return Object.values(job).every((value) => value !== null) ? job : null;
+  return [
+    job.expiresAt,
+    job.generationAttempt,
+    job.generationRetryAt,
+    job.jobId,
+    job.sourceBucket,
+    job.sourceKey,
+    job.sourceVersionId,
+  ].every((value) => value !== null)
+    ? job
+    : null;
 }
 
 async function getExpiredGenerationJobs(now) {
@@ -127,11 +140,12 @@ async function scheduleRetry(job, now, delaySeconds) {
       TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
       Key: { job_id: { S: job.jobId } },
       ConditionExpression:
-        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :attempt AND #generationRetryAt = :generationRetryAt AND #expiresAt > :now",
-      UpdateExpression: "SET #generationRetryAt = :nextRetryAt, #updatedAt = :now",
+        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :attempt AND #generationRetryAt = :generationRetryAt AND #retryState IN (:retryPending, :retryScheduled) AND #expiresAt > :now",
+      UpdateExpression: "SET #generationRetryAt = :nextRetryAt, #retryState = :retryScheduled, #updatedAt = :now",
       ExpressionAttributeNames: {
         "#generationAttempt": "generation_attempt",
         "#generationRetryAt": "generation_retry_at",
+        "#retryState": "generation_retry_state",
         "#expiresAt": "expires_at",
         "#status": "status",
         "#updatedAt": "updated_at",
@@ -142,6 +156,8 @@ async function scheduleRetry(job, now, delaySeconds) {
         ":generationRetryAt": { N: String(job.generationRetryAt) },
         ":nextRetryAt": { N: String(nextRetryAt) },
         ":now": { N: String(now) },
+        ":retryPending": { S: GENERATION_RETRY_PENDING },
+        ":retryScheduled": { S: GENERATION_RETRY_SCHEDULED },
       },
     }),
   );
@@ -173,18 +189,19 @@ async function markJobFailed(job, now) {
       ConditionExpression:
         "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :attempt AND #generationRetryAt = :generationRetryAt",
       UpdateExpression:
-        "SET #status = :failed, #error = :error, #updatedAt = :now REMOVE #generationRetryAt",
+        "SET #status = :failed, #error = :error, #updatedAt = :now REMOVE #generationRetryAt, #retryState",
       ExpressionAttributeNames: {
         "#error": "error",
         "#generationAttempt": "generation_attempt",
         "#generationRetryAt": "generation_retry_at",
+        "#retryState": "generation_retry_state",
         "#status": "status",
         "#updatedAt": "updated_at",
       },
       ExpressionAttributeValues: {
         ":attempt": { N: String(job.generationAttempt) },
         ":error": {
-          S: `Image generation did not complete before its lease expired after ${requiredPositiveIntegerEnvironment("GENERATION_MAX_RETRIES")} retries.`,
+          S: `Image generation did not complete after ${requiredPositiveIntegerEnvironment("GENERATION_MAX_RETRIES")} retries.`,
         },
         ":failed": { S: "FAILED" },
         ":generating": { S: "GENERATING" },
@@ -203,20 +220,21 @@ async function markExpiredGenerationJob(job, now) {
       TableName: requiredEnvironment("DYNAMODB_JOBS_TABLE"),
       Key: { job_id: { S: job.jobId } },
       ConditionExpression:
-        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :attempt AND #generationRetryAt = :generationRetryAt AND #expiresAt <= :now",
+        "attribute_exists(job_id) AND #status = :generating AND #generationAttempt = :attempt AND #generationRetryAt = :generationRetryAt AND attribute_not_exists(#retryState) AND #expiresAt <= :now",
       UpdateExpression:
-        "SET #status = :failed, #error = :error, #updatedAt = :now REMOVE #generationRetryAt",
+        "SET #status = :failed, #error = :error, #updatedAt = :now REMOVE #generationRetryAt, #retryState",
       ExpressionAttributeNames: {
         "#error": "error",
         "#expiresAt": "expires_at",
         "#generationAttempt": "generation_attempt",
         "#generationRetryAt": "generation_retry_at",
+        "#retryState": "generation_retry_state",
         "#status": "status",
         "#updatedAt": "updated_at",
       },
       ExpressionAttributeValues: {
         ":attempt": { N: String(job.generationAttempt) },
-        ":error": { S: "Image job expired before generation could be retried" },
+        ":error": { S: "Image generation exceeded the five-minute execution limit" },
         ":failed": { S: "FAILED" },
         ":generating": { S: "GENERATING" },
         ":generationRetryAt": { N: String(job.generationRetryAt) },
@@ -349,14 +367,17 @@ async function recoverJob(job, now) {
       return await markExpiredGenerationJob(job, now);
     }
 
-    const recovery = generationRecoveryAction(
+    const recovery = generationLeaseRecoveryAction(
       job.generationAttempt,
       requiredPositiveIntegerEnvironment("GENERATION_MAX_RETRIES"),
       requiredPositiveIntegerEnvironment("GENERATION_RETRY_BASE_DELAY_SECONDS"),
+      job.generationRetryState,
     );
 
     if (recovery.action === "fail") {
-      return await markJobFailed(job, now);
+      return recovery.reason === "lease-expired"
+        ? await markExpiredGenerationJob(job, now)
+        : await markJobFailed(job, now);
     }
 
     return await scheduleRetry(job, now, recovery.delaySeconds);

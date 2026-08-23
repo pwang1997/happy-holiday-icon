@@ -1,6 +1,8 @@
 export const MAX_GENERATION_RETRIES = 3;
 export const TERMINAL_GENERATION_FAILURE = "terminal";
 export const RETRYABLE_GENERATION_FAILURE = "retryable";
+export const GENERATION_RETRY_PENDING = "PENDING";
+export const GENERATION_RETRY_SCHEDULED = "SCHEDULED";
 
 const RETRYABLE_HTTP_STATUSES = new Set([408, 409, 425, 429]);
 const RETRYABLE_ERROR_NAMES = new Set([
@@ -195,4 +197,28 @@ export function generationRecoveryAction(
       baseDelaySeconds,
     ),
   };
+}
+
+export function generationLeaseRecoveryAction(
+  completedAttempts,
+  maxRetries,
+  baseDelaySeconds,
+  retryState,
+) {
+  if (retryState === null) {
+    return { action: "fail", reason: "lease-expired" };
+  }
+
+  if (
+    retryState !== GENERATION_RETRY_PENDING &&
+    retryState !== GENERATION_RETRY_SCHEDULED
+  ) {
+    throw new Error("retryState must be PENDING, SCHEDULED, or null");
+  }
+
+  return generationRecoveryAction(
+    completedAttempts,
+    maxRetries,
+    baseDelaySeconds,
+  );
 }

@@ -112,6 +112,7 @@ resource "aws_lambda_function" "image_generator" {
       MAX_SOURCE_IMAGE_DIMENSION  = var.max_source_image_dimension
       MAX_SOURCE_IMAGE_PIXELS     = var.max_source_image_pixels
       OPENAI_API_KEY_SECRET_ARN   = aws_secretsmanager_secret.openai_api_key.arn
+      RESHAPING_LEASE_SECONDS     = var.image_reshaping_timeout_seconds + var.image_reshaping_lease_grace_seconds
       SOURCE_BUCKET               = aws_s3_bucket.images.bucket
     }
   }
