@@ -6,6 +6,7 @@
   <a href="https://www.terraform.io/"><img alt="Terraform" src="https://img.shields.io/badge/Terraform-7B42BC?logo=terraform&amp;logoColor=white" /></a>
   <a href="https://aws.amazon.com/"><img alt="AWS" src="https://img.shields.io/badge/AWS-232F3E?logo=amazonwebservices&amp;logoColor=FF9900" /></a>
   <a href="https://github.com/pwang1997/happy-holiday-icon/actions/workflows/ci.yml"><img alt="CI test coverage status" src="https://github.com/pwang1997/happy-holiday-icon/actions/workflows/ci.yml/badge.svg?branch=main" /></a>
+  <a href="https://deepwiki.com/pwang1997/happy-holiday-icon"><img alt="deepwiki" src="https://deepwiki.com/badge.svg" /></a>
 </p>
 
 Happy Holiday Icon turns an uploaded PNG, JPEG, or WebP image into a holiday vibed icon, then produces optimized WebP derivatives at 32px, 48px, and 512px. 
