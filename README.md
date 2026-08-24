@@ -98,7 +98,3 @@ terraform -chdir=infra apply
 ```
 
 Configure the Next.js runtime from the `app_environment` Terraform output. Attach `image_upload_policy_arn`, `image_jobs_policy_arn`, `anonymous_usage_policy_arn`, and `submission_guard_policy_arn` to its runtime identity. Set the private `SUBMISSION_GUARD_SECRET` separately. Anonymous submissions require the trusted proxy to remove any client-supplied `X-Submission-Proxy-Token`, inject the configured secret, and supply a sanitized `X-Forwarded-For` header. Terraform configures the Lambda execution role, S3 notification, and Lambda access automatically.
-
-## Test coverage
-
-`pnpm test:coverage` prints Node's line, branch, and function coverage summary. GitHub Actions saves the raw V8 profiles in `coverage/` and uploads them as the `test-coverage` artifact.
