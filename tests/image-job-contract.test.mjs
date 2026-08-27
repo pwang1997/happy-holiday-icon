@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   apiErrorMessage,
   isImageJobCreationResponse,
+  isImageJobListResponse,
   isImageJobStatusResponse,
 } from "../app/lib/image-job-contract.ts";
 
@@ -51,6 +52,24 @@ test("validates a ready image-job response with derivatives", () => {
     isImageJobStatusResponse({ status: "READY", imageUrls: [] }),
     false,
   );
+});
+
+test("validates a list of image-job summaries", () => {
+  assert.equal(
+    isImageJobListResponse({
+      jobs: [
+        {
+          jobId: "job-123",
+          status: "READY",
+          error: null,
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+    }),
+    true,
+  );
+  assert.equal(isImageJobListResponse({ jobs: [{ status: "READY" }] }), false);
 });
 
 test("reads API error messages with a fallback", () => {

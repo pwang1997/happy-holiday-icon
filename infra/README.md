@@ -5,7 +5,7 @@ This module provisions two private S3 buckets:
 - `image_bucket_name` / `AWS_S3_BUCKET`: temporary ingest storage. Browser source uploads use `uploads/`; generated images use `images/`, which triggers the reshaping Lambda. Both prefixes expire after the configured retention period.
 - `final_image_bucket_name` / `AWS_S3_FINAL_BUCKET`: durable final-image storage. The Lambda writes the WebP derivatives here.
 
-It also provisions `image_jobs_table_name` / `DYNAMODB_JOBS_TABLE`, an on-demand DynamoDB table for transient image job status. Store the status in a `status` attribute and the Unix epoch expiration time in `expires_at`; TTL cleanup is enabled for that attribute.
+It also provisions `image_jobs_table_name` / `DYNAMODB_JOBS_TABLE`, an on-demand DynamoDB table for transient image job status. Store the status in a `status` attribute and the Unix epoch expiration time in `expires_at`; TTL cleanup is enabled for that attribute. Its `owner-created-at` index supports the signed-in dashboard's newest-first run list without scanning other users' jobs.
 
 It provisions `anonymous_usage_table_name` / `DYNAMODB_USAGE_TABLE`, an on-demand DynamoDB table that records usage for anonymous visitors and authenticated Cognito users. Its conditional counter enforces five anonymous trials per trusted client address. The browser cookie remains an opaque image-job owner identifier; it does not determine anonymous trial usage.
 

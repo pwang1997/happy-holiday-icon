@@ -80,12 +80,20 @@ function Page() {
           </p>
           <nav aria-label="Account" className="mt-5 flex gap-4 text-sm">
             {isAuthenticated ? (
-              <a
-                href="/api/auth/logout"
-                className="font-medium text-slate-400 hover:text-slate-200"
-              >
-                Sign out
-              </a>
+              <>
+                <a
+                  href="/dashboard"
+                  className="font-medium text-amber-300 hover:text-amber-200"
+                >
+                  Your runs
+                </a>
+                <a
+                  href="/api/auth/logout"
+                  className="font-medium text-slate-400 hover:text-slate-200"
+                >
+                  Sign out
+                </a>
+              </>
             ) : (
               <a
                 href="/api/auth/login"

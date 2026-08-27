@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Happy Holiday Icon API
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Creates holiday icons from uploaded images. `POST /api/submit` admits a job
     and returns a bounded presigned S3 POST form. The browser uploads the source
@@ -16,6 +16,37 @@ tags:
   - name: Authentication
     description: Cognito managed-login session endpoints.
 paths:
+  /api/jobs:
+    get:
+      tags: [Jobs]
+      operationId: listImageJobs
+      summary: List the signed-in user's recent image runs
+      description: |
+        Returns up to 100 unexpired image-job summaries, newest first, for the
+        authenticated Cognito user. The response intentionally excludes signed
+        image URLs; request an individual completed job to obtain its downloads.
+      security:
+        - bearerAuth: []
+        - cognitoAccessToken: []
+      responses:
+        '200':
+          description: The user's recent image-job summaries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageJobList'
+        '401':
+          description: The caller is anonymous or has an invalid Cognito session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Cognito or DynamoDB is unavailable or not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/jobs/{jobId}:
     get:
       tags: [Jobs]
@@ -401,6 +432,34 @@ components:
           type: integer
           format: int64
           description: Unix epoch seconds; expired jobs return 404.
+    ImageJobList:
+      type: object
+      required: [jobs]
+      properties:
+        jobs:
+          type: array
+          description: Up to 100 unexpired jobs, newest first.
+          items:
+            $ref: '#/components/schemas/ImageJobSummary'
+    ImageJobSummary:
+      type: object
+      required: [jobId, status, error, createdAt, updatedAt]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        error:
+          type: [string, 'null']
+        createdAt:
+          type: integer
+          format: int64
+          description: Unix epoch seconds when the job was created.
+        updatedAt:
+          type: integer
+          format: int64
+          description: Unix epoch seconds when the job last changed state.
     ImageUrl:
       type: object
       required: [key, size, url]

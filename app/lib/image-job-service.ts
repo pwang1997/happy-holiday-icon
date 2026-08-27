@@ -2,10 +2,12 @@ import {
   createImageJob,
   getImageJob,
   isExpired,
+  listImageJobs,
   type ImageJobOwner,
 } from "./jobs";
 import type {
   ImageJobCreationResponse,
+  ImageJobListResponse,
   ImageJobStatusResponse,
 } from "./image-job-contract";
 import {
@@ -23,6 +25,7 @@ type ImageJobServiceDependencies = {
   getImageDownloadUrlIfExists: typeof getImageDownloadUrlIfExists;
   getImageJob: typeof getImageJob;
   getTemporaryImageUploadPost: typeof getTemporaryImageUploadPost;
+  listImageJobs: typeof listImageJobs;
 };
 
 export class ImageJobServiceError extends Error {
@@ -121,6 +124,7 @@ export function createImageJobService({
   getImageDownloadUrlIfExists: getDownloadUrl,
   getImageJob: getJob,
   getTemporaryImageUploadPost: createUploadPost,
+  listImageJobs: listJobs,
 }: ImageJobServiceDependencies) {
   return {
     async createImageUploadJob(
@@ -135,6 +139,24 @@ export function createImageJobService({
         sourceKey: job.sourceKey,
         upload,
         expiresAt: job.expiresAt,
+      };
+    },
+
+    async listImageJobsForOwner(
+      owner: ImageJobOwner,
+    ): Promise<ImageJobListResponse> {
+      const jobs = await listJobs(owner);
+
+      return {
+        jobs: jobs
+          .filter((job) => !isExpired(job))
+          .map(({ createdAt, error, jobId, status, updatedAt }) => ({
+            jobId,
+            status,
+            error,
+            createdAt,
+            updatedAt,
+          })),
       };
     },
 
@@ -197,4 +219,5 @@ export const imageJobService = createImageJobService({
   getImageDownloadUrlIfExists,
   getImageJob,
   getTemporaryImageUploadPost,
+  listImageJobs,
 });

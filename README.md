@@ -84,7 +84,7 @@ flowchart LR
 
 ## API contract
 
-[`openapi.yaml`](openapi.yaml) documents the six App Router endpoints for **job admission**, **polling**, and **Cognito auth**. Before OpenAI prompt validation, `POST /api/submit` validates the request, authenticates the caller, and atomically enforces per-caller rate and concurrency limits. It then rejects attempts to override the image-generation instructions, creates the job, records usage, and returns the bounded presigned S3 POST upload handoff.
+[`openapi.yaml`](openapi.yaml) documents the seven App Router endpoints for **job admission**, **run listing and polling**, and **Cognito auth**. Before OpenAI prompt validation, `POST /api/submit` validates the request, authenticates the caller, and atomically enforces per-caller rate and concurrency limits. It then rejects attempts to override the image-generation instructions, creates the job, records usage, and returns the bounded presigned S3 POST upload handoff.
 
 ## Provision infrastructure
 

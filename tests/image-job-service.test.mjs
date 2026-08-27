@@ -27,7 +27,12 @@ const JOB_OWNER = {
   ownerType: JOB.ownerType,
 };
 
-function createService({ job = JOB, downloadUrl = null, onDownload } = {}) {
+function createService({
+  job = JOB,
+  jobs = [JOB],
+  downloadUrl = null,
+  onDownload,
+} = {}) {
   return createImageJobService({
     createImageJob: async () => job,
     getImageDownloadUrlIfExists: async (...arguments_) => {
@@ -40,6 +45,7 @@ function createService({ job = JOB, downloadUrl = null, onDownload } = {}) {
       fields: { key: JOB.sourceKey },
       maxBytes: 10 * 1024 * 1024,
     }),
+    listImageJobs: async () => jobs,
   });
 }
 
@@ -172,4 +178,35 @@ test("hides jobs from a different identity", async () => {
       }),
     (error) => error instanceof ImageJobServiceError && error.status === 404,
   );
+});
+
+test("lists only unexpired run summaries for the authenticated owner", async () => {
+  const service = createService({
+    jobs: [
+      {
+        ...JOB,
+        jobId: "recent-run",
+        ownerId: "USER#subject",
+        ownerType: "authenticated",
+      },
+      { ...JOB, jobId: "expired-run", expiresAt: 0 },
+    ],
+  });
+
+  const result = await service.listImageJobsForOwner({
+    ownerId: "USER#subject",
+    ownerType: "authenticated",
+  });
+
+  assert.deepEqual(result, {
+    jobs: [
+      {
+        jobId: "recent-run",
+        status: "UPLOADING",
+        error: null,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ],
+  });
 });

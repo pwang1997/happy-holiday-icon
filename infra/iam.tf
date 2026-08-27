@@ -50,10 +50,14 @@ resource "aws_iam_policy" "nextjs_image_jobs" {
         Action = [
           "dynamodb:GetItem",
           "dynamodb:PutItem",
+          "dynamodb:Query",
           "dynamodb:UpdateItem",
         ]
 
-        Resource = aws_dynamodb_table.image_jobs.arn
+        Resource = [
+          aws_dynamodb_table.image_jobs.arn,
+          "${aws_dynamodb_table.image_jobs.arn}/index/owner-created-at",
+        ]
       },
     ]
   })

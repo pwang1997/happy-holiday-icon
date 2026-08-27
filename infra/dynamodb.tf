@@ -14,6 +14,16 @@ resource "aws_dynamodb_table" "image_jobs" {
   }
 
   attribute {
+    name = "owner_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "created_at"
+    type = "N"
+  }
+
+  attribute {
     name = "generation_retry_at"
     type = "N"
   }
@@ -29,6 +39,21 @@ resource "aws_dynamodb_table" "image_jobs" {
 
     key_schema {
       attribute_name = "generation_retry_at"
+      key_type       = "RANGE"
+    }
+  }
+
+  global_secondary_index {
+    name            = "owner-created-at"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "owner_id"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "created_at"
       key_type       = "RANGE"
     }
   }

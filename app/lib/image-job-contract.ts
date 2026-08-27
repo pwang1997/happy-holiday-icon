@@ -40,6 +40,18 @@ export type ImageJobStatusResponse = {
   expiresAt: number;
 };
 
+export type ImageJobSummary = {
+  jobId: string;
+  status: ImageJobStatus;
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type ImageJobListResponse = {
+  jobs: ImageJobSummary[];
+};
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -95,6 +107,28 @@ export function isImageJobStatusResponse(
     typeof value.createdAt === "number" &&
     typeof value.updatedAt === "number" &&
     typeof value.expiresAt === "number"
+  );
+}
+
+function isImageJobSummary(value: unknown): value is ImageJobSummary {
+  return (
+    isObject(value) &&
+    typeof value.jobId === "string" &&
+    typeof value.status === "string" &&
+    IMAGE_JOB_STATUSES.includes(value.status as ImageJobStatus) &&
+    (value.error === null || typeof value.error === "string") &&
+    typeof value.createdAt === "number" &&
+    typeof value.updatedAt === "number"
+  );
+}
+
+export function isImageJobListResponse(
+  value: unknown,
+): value is ImageJobListResponse {
+  return (
+    isObject(value) &&
+    Array.isArray(value.jobs) &&
+    value.jobs.every(isImageJobSummary)
   );
 }
 

@@ -6,6 +6,7 @@ import {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
+  QueryCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import {
@@ -16,6 +17,7 @@ import type { Style } from "./instructions";
 
 export const JOB_STATUSES = IMAGE_JOB_STATUSES;
 export type JobStatus = ImageJobStatus;
+const OWNER_CREATED_AT_INDEX = "owner-created-at";
 
 export type ImageJobOwner = {
   ownerId: string;
@@ -182,6 +184,29 @@ export async function getImageJob(jobId: string) {
   );
 
   return result.Item ? toImageJob(result.Item) : null;
+}
+
+export async function listImageJobs(owner: ImageJobOwner) {
+  const result = await getClient().send(
+    new QueryCommand({
+      TableName: getTableName(),
+      IndexName: OWNER_CREATED_AT_INDEX,
+      KeyConditionExpression: "#ownerId = :ownerId",
+      ExpressionAttributeNames: {
+        "#ownerId": "owner_id",
+      },
+      ExpressionAttributeValues: {
+        ":ownerId": owner.ownerId,
+      },
+      Limit: 100,
+      ScanIndexForward: false,
+    }),
+  );
+
+  return (result.Items ?? []).flatMap((item) => {
+    const job = toImageJob(item);
+    return job ? [job] : [];
+  });
 }
 
 export async function updateImageJob(
